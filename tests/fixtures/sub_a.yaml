@@ -1,0 +1,161 @@
+# sub_a.yaml — 机场 A 订阅 fixture（Clash YAML 直出格式）
+# 14 条 proxies：12 个真实节点（vless 10 / ss 3 / anytls 1，其中 2 个假节点为 ss）+ 2 个假节点。
+# 覆盖：美国 3（家宽 1、DMIT 机房 1、x2 倍率 1）、香港 2、台湾/日本/新加坡/韩国/英国/德国各 1、
+#       无地区特征 1、假节点 2（「剩余流量」「官网」）。
+proxies:
+  - name: "🇺🇸 美国 洛杉矶 家庭宽带 01"
+    type: vless
+    server: us-lax-01.example-airport-a.com
+    port: 443
+    uuid: "11111111-1111-4111-8111-111111111101"
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    servername: us-lax-01.example-airport-a.com
+
+  - name: "🇺🇸 美国 DMIT 高防机房 01"
+    type: vless
+    server: us-dmit-01.example-airport-a.com
+    port: 443
+    uuid: "22222222-2222-4222-8222-222222222202"
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    servername: us-dmit-01.example-airport-a.com
+
+  - name: "🇺🇸 美国 圣何塞 专线 x2"
+    type: vless
+    server: us-sjc-02.example-airport-a.com
+    port: 443
+    uuid: "33333333-3333-4333-8333-333333333303"
+    network: ws
+    udp: true
+    tls: true
+    servername: us-sjc-02.example-airport-a.com
+    ws-opts:
+      path: /ws
+      headers:
+        Host: us-sjc-02.example-airport-a.com
+
+  - name: "🇭🇰 香港 01"
+    type: vless
+    server: hk-01.example-airport-a.com
+    port: 443
+    uuid: "44444444-4444-4444-8444-444444444404"
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    servername: hk-01.example-airport-a.com
+
+  - name: "🇭🇰 香港 IEPL 专线 02"
+    type: vless
+    server: hk-iepl-02.example-airport-a.com
+    port: 8443
+    uuid: "55555555-5555-4555-8555-555555555505"
+    network: tcp
+    udp: true
+    tls: true
+    servername: hk-iepl-02.example-airport-a.com
+
+  - name: "🇹🇼 台湾 01"
+    type: vless
+    server: tw-01.example-airport-a.com
+    port: 443
+    uuid: "66666666-6666-4666-8666-666666666606"
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    servername: tw-01.example-airport-a.com
+
+  - name: "🇯🇵 日本 东京 01"
+    type: vless
+    server: jp-tyo-01.example-airport-a.com
+    port: 443
+    uuid: "77777777-7777-4777-8777-777777777707"
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    servername: jp-tyo-01.example-airport-a.com
+
+  - name: "🇸🇬 新加坡 01"
+    type: anytls
+    server: sg-01.example-airport-a.com
+    port: 443
+    password: "fake-anytls-password-sg-01"
+    udp: true
+    sni: sg-01.example-airport-a.com
+    skip-cert-verify: false
+    alpn:
+      - h2
+      - http/1.1
+
+  - name: "🇰🇷 韩国 首尔 01"
+    type: ss
+    server: kr-01.example-airport-a.com
+    port: 8388
+    cipher: aes-256-gcm
+    password: "fake-ss-password-kr-01"
+    udp: true
+
+  - name: "🇬🇧 英国 伦敦 01"
+    type: vless
+    server: uk-lon-01.example-airport-a.com
+    port: 443
+    uuid: "88888888-8888-4888-8888-888888888808"
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    servername: uk-lon-01.example-airport-a.com
+
+  - name: "🇩🇪 德国 法兰克福 01"
+    type: vless
+    server: de-fra-01.example-airport-a.com
+    port: 443
+    uuid: "99999999-9999-4999-8999-999999999909"
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    servername: de-fra-01.example-airport-a.com
+
+  - name: "Premium Node 01"
+    type: vless
+    server: premium-01.example-airport-a.com
+    port: 443
+    uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa0a"
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    servername: premium-01.example-airport-a.com
+
+  # ---- 以下为假节点（应被 cleaner 过滤）----
+  - name: "剩余流量：200GB"
+    type: ss
+    server: info-01.example-airport-a.com
+    port: 8388
+    cipher: aes-256-gcm
+    password: "fake-ss-password-info"
+    udp: true
+
+  - name: "官网：example-airport-a.com 请续费"
+    type: ss
+    server: info-02.example-airport-a.com
+    port: 8388
+    cipher: aes-256-gcm
+    password: "fake-ss-password-web"
+    udp: true

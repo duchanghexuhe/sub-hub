@@ -1,0 +1,17 @@
+# claude-extra — sub-hub 自维护 Claude 域名钉死规则集（docs/02 §3）
+# 定位：规则链第 1 位（防上游漏域），出口组「🛑 Claude 专用」
+# behavior: classical（payload 为 TYPE,value 行，由 sub-hub 以 rule-provider 托管分发）
+# 维护：域名增删改 rules_manifest.yaml 的 claude-extra.domains，并同步本文件与 claude-extra.list
+payload:
+  # ---- 精确钉死：docs/02 §3 所列端点（Claude Code / claude.ai 主链路）----
+  - DOMAIN,api.anthropic.com
+  - DOMAIN,claude.ai
+  - DOMAIN,claude.com
+  - DOMAIN,statsig.anthropic.com
+  - DOMAIN,console.anthropic.com
+  # ---- 整域兜底：后缀覆盖全部子域 ----
+  - DOMAIN-SUFFIX,anthropic.com
+  - DOMAIN-SUFFIX,claude.ai
+  - DOMAIN-SUFFIX,claude.com
+  # ---- 用户内容域（artifacts 等生成内容托管）----
+  - DOMAIN-SUFFIX,claudeusercontent.com

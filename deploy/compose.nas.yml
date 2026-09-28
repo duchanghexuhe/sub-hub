@@ -1,0 +1,22 @@
+# sub-hub — NAS 实际部署编排（落在 /share/Container/sub-hub/docker-compose.yml）
+# 镜像在 Windows 本机构建后 docker save | ssh nas docker load 直传，NAS 上不构建；
+# 更新流程见仓库 README「NAS 部署」。本文件是 NAS 侧实际运行的编排的存档。
+services:
+  sub-hub:
+    image: sub-hub:latest
+    container_name: sub-hub
+    ports:
+      - "8399:8399"          # 管理页面/分发端点/规则分发
+    volumes:
+      - ./data:/app/data     # SQLite、密钥、token、产物版本、规则缓存、探测配置全部在此持久化
+    environment:
+      SUBHUB_HOST: 0.0.0.0
+      SUBHUB_PORT: 8399
+      SUBHUB_NAS_HOST: 192.168.31.10   # 构造分发链接用
+      # 规则上游（raw.githubusercontent.com）直连失败时的回落代理（Windows 主机 Clash，
+      # 与 NAS dockerd 同一代理惯例）；仅作用于规则镜像，机场订阅始终直连。
+      # Clash 关闭时规则自动回落内置基线/缓存，分发与发布链路不受影响。
+      SUBHUB_RULES_PROXY: http://192.168.31.132:7897
+      # 本容器不设全局 HTTP(S)_PROXY：机场订阅必须直连（机场常拒绝境外出口），
+      # 容器内探测实例控制 API（127.0.0.1:9095）也绝不能走代理。
+    restart: unless-stopped

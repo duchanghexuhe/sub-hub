@@ -1,0 +1,63 @@
+# ==============================================================
+# sub-hub 自动生成 · mihomo（Clash Verge）配置 · {{ variant_label }}
+# 请勿手工编辑：订阅刷新后整份覆盖（保留最近 5 个版本可回退）
+# 节点 {{ node_count }} 个 · 分组 {{ group_count }} 个
+{% if offline %}
+# 规则集：全部内联（离线自包含，无任何外链，本地导入即用）
+{% else %}
+# 规则集：由 NAS 统一分发（{{ base_url }}/rules/），客户端只碰 NAS
+{% endif %}
+# ==============================================================
+mixed-port: 7897
+external-controller: 127.0.0.1:9097
+mode: rule
+log-level: info
+allow-lan: false
+unified-delay: true
+tcp-concurrent: true
+dns:
+  enable: true
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "*.localdomain"
+    - "*.localhost"
+    - "*.test"
+    - "*.invalid"
+    - "*.home.arpa"
+    - "localhost.ptlogin2.qq.com"
+    - "localhost.sec.qq.com"
+    - "+.market.xiaomi.com"
+    - "*.qq.com"
+    - "*.weixin.qq.com"
+    - "*.taobao.com"
+    - "*.tmall.com"
+    - "*.alicdn.com"
+    - "*.alipay.com"
+    - "*.jd.com"
+    - "*.baidu.com"
+    - "*.bdstatic.com"
+    - "*.bilibili.com"
+    - "*.mi.com"
+    - "*.xiaomi.com"
+  nameserver:
+    - https://doh.pub/dns-query
+    - https://dns.alidns.com/dns-query
+
+proxies:
+{% for block in proxy_blocks %}{{ block }}
+{% endfor %}
+
+proxy-groups:
+{% for block in group_blocks %}{{ block }}
+{% endfor %}
+
+rule-providers:
+{% for block in provider_blocks %}{{ block }}
+{% endfor %}
+
+rules:
+{% for line in rule_lines %}  - {{ line }}
+{% endfor %}

@@ -1,0 +1,44 @@
+# sub_b.yaml — 机场 B 订阅 fixture（Clash YAML 直出格式）
+# 4 条 proxies：与 sub_a 同名 1（用于重名消歧「原名 [别名]」）、日本家宽 1、anytls 1、
+# 「套餐到期」假节点 1。
+proxies:
+  - name: "🇺🇸 美国 洛杉矶 家庭宽带 01"
+    type: vless
+    server: us-lax-01.example-airport-b.com
+    port: 2053
+    uuid: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1"
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    servername: us-lax-01.example-airport-b.com
+
+  - name: "🇯🇵 日本 大阪 家庭宽带 02"
+    type: vless
+    server: jp-osa-02.example-airport-b.com
+    port: 2053
+    uuid: "cccccccc-cccc-4ccc-8ccc-ccccccccccc2"
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    servername: jp-osa-02.example-airport-b.com
+
+  - name: "🇸🇬 新加坡 02"
+    type: anytls
+    server: sg-02.example-airport-b.com
+    port: 443
+    password: "fake-anytls-password-sg-02"
+    udp: true
+    sni: sg-02.example-airport-b.com
+    skip-cert-verify: false
+
+  - name: "套餐到期：2026-12-31"
+    type: ss
+    server: info-01.example-airport-b.com
+    port: 8388
+    cipher: chacha20-ietf-poly1305
+    password: "fake-ss-password-expire"
+    udp: true

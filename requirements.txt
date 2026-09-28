@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+jinja2
+apscheduler
+pyyaml
+cryptography
+httpx
+qrcode
+pytest

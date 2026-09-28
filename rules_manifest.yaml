@@ -1,0 +1,309 @@
+# rules_manifest.yaml — 规则集清单（docs/02 §3 的文件化）
+# 消费方：rulesync（定时镜像上游到 data/rules/）与 templater（生成 rule-providers / RULE-SET）。
+# 客户端 RULE-SET 一律指向 http://<nas>:8399/rules/<file>，永远只碰 NAS。
+#
+# 字段说明：
+#   name        逻辑名（= 缓存文件基名，data/rules/<clash_file>|<sr_file>）
+#   category    类目（docs/02 §3 表格列）
+#   source      上游来源键，见 sources；builtin 表示容器内置自维护规则
+#   upstream_file  上游规则目录名（= URL 模板 {dir}；source 为 builtin 时无此字段）
+#   upstream_clash / upstream_sr
+#               可选：URL 模板 {file} 文件基名覆盖（缺省同 upstream_file；
+#               用于上游变体文件，如 Netflix 的完整版为 Netflix_Classical.yaml）
+#   clash_file  Clash/mihomo 格式缓存文件名（.yaml）
+#   sr_file     SR 格式缓存文件名（.list）
+#   policy      规则链中该规则集的出口组（组名以 docs/02 §2 为准）或 DIRECT
+#   behavior    mihomo rule-providers 行为：domain / ipcidr / classical
+#   note        转换/兜底说明
+# 列表顺序即规则链顺序（docs/02 §3「规则链顺序」），templater 不得重排。
+
+manifest_version: 1
+
+sources:
+  # blackmatrix7/ios_rule_script 同仓库双格式：{dir}=规则目录（upstream_file），
+  # {file}=文件基名（缺省同 upstream_file；两格式基名不一致时用 upstream_clash/upstream_sr 覆盖）
+  blackmatrix7_clash: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/{dir}/{file}.yaml
+  blackmatrix7_sr: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Shadowrocket/{dir}/{file}.list
+  # Loyalsoldier/clash-rules release 分支为 txt payload，rulesync 需转换为 yaml/list 双格式缓存
+  loyalsoldier: https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/{file}
+  builtin: builtin   # 自维护 claude-extra：随容器打包内置基线，rulesync 只需复制到 data/rules/
+
+rules:
+  # ---- 1. Claude（自维护补丁最前，防上游漏域）----
+  - name: claude-extra
+    category: Claude（自维护补丁）
+    source: builtin
+    clash_file: claude-extra.yaml
+    sr_file: claude-extra.list
+    policy: "🛑 Claude 专用"
+    behavior: classical   # payload 为 TYPE,value 行（DOMAIN/DOMAIN-SUFFIX），mihomo behavior 须为 classical
+    domains:
+      - api.anthropic.com
+      - claude.ai
+      - claude.com
+      - statsig.anthropic.com
+      - console.anthropic.com
+      - anthropic.com
+      - claudeusercontent.com
+    note: 显式钉死 Claude Code / claude.ai 相关端点（claudeusercontent.com 为 artifacts 内容域）；增删域名只改本文件
+
+  # ---- 2. Claude（上游）----
+  - name: Claude
+    category: Claude（上游）
+    source: blackmatrix7
+    upstream_file: Claude
+    clash_file: Claude.yaml
+    sr_file: Claude.list
+    policy: "🛑 Claude 专用"
+    behavior: classical
+
+  # ---- 3. AI 单列 → 各自组 ----
+  - name: OpenAI
+    category: AI 单列
+    source: blackmatrix7
+    upstream_file: OpenAI
+    clash_file: OpenAI.yaml
+    sr_file: OpenAI.list
+    policy: "🎁 OpenAI"
+    behavior: classical
+
+  - name: Gemini
+    category: AI 单列
+    source: blackmatrix7
+    upstream_file: Gemini
+    clash_file: Gemini.yaml
+    sr_file: Gemini.list
+    policy: "🤖 Gemini"
+    behavior: classical
+
+  - name: Copilot
+    category: AI 单列
+    source: blackmatrix7
+    upstream_file: Copilot
+    clash_file: Copilot.yaml
+    sr_file: Copilot.list
+    policy: "🐙 Copilot"
+    behavior: classical
+
+  - name: Grok
+    category: AI 单列
+    source: builtin
+    clash_file: Grok.yaml
+    sr_file: Grok.list
+    policy: "🧠 通用 AI"     # 无专属组：未被单列组的 AI 服务统一进通用 AI（docs/02 §2）
+    behavior: classical   # payload 为 DOMAIN-SUFFIX,x 行，behavior 须为 classical
+    domains:
+      - x.ai
+    note: 校准（2026-09-27 实测）：blackmatrix7 无 Grok 规则集（Clash/SR 两树均 404），转自维护内置基线
+
+  - name: Perplexity
+    category: AI 单列
+    source: builtin
+    clash_file: Perplexity.yaml
+    sr_file: Perplexity.list
+    policy: "🧠 通用 AI"
+    behavior: classical
+    domains:
+      - perplexity.ai
+      - pplx.ai
+    note: 校准（2026-09-27 实测）：blackmatrix7 无 Perplexity 规则集，转自维护内置基线
+
+  - name: CursorAI
+    category: AI 单列
+    source: builtin
+    clash_file: CursorAI.yaml
+    sr_file: CursorAI.list
+    policy: "🧠 通用 AI"
+    behavior: classical
+    domains:
+      - cursor.com
+      - cursor.sh
+    note: 校准（2026-09-27 实测）：blackmatrix7 无 Cursor/CursorAI 规则集，转自维护内置基线
+
+  # ---- 4. AI 兜底（聚合）----
+  - name: AI
+    category: AI 兜底
+    source: builtin
+    clash_file: AI.yaml
+    sr_file: AI.list
+    policy: "🧠 通用 AI"
+    behavior: classical
+    domains:
+      - mistral.ai
+      - huggingface.co
+      - character.ai
+      - midjourney.com
+      - groq.com
+      - openrouter.ai
+      - together.ai
+      - poe.com
+    note: 校准（2026-09-27 实测）：blackmatrix7 无 AI 聚合目录，转自维护兜底清单（未被单列的 AI 服务）
+
+  # ---- 5. 社交 ----
+  - name: Telegram
+    category: 社交
+    source: blackmatrix7
+    upstream_file: Telegram
+    clash_file: Telegram.yaml
+    sr_file: Telegram.list
+    policy: "📲 Telegram"
+    behavior: classical
+
+  # ---- 6. 流媒体 → 对应 select 组 ----
+  - name: Netflix
+    category: 流媒体
+    source: blackmatrix7
+    upstream_file: Netflix
+    upstream_clash: Netflix_Classical           # 主 Netflix.yaml 为残缺桩（仅 1.6KB），完整版在 _Classical
+                                                # SR 端 Netflix.list 即完整 classical 版（TOTAL 一致 1157）
+    clash_file: Netflix.yaml
+    sr_file: Netflix.list
+    policy: "🎬 Netflix"
+    behavior: classical
+
+  - name: Disney
+    category: 流媒体
+    source: blackmatrix7
+    upstream_file: Disney
+    clash_file: Disney.yaml
+    sr_file: Disney.list
+    policy: "🏰 Disney+"
+    behavior: classical
+
+  - name: YouTube
+    category: 流媒体
+    source: blackmatrix7
+    upstream_file: YouTube
+    clash_file: YouTube.yaml
+    sr_file: YouTube.list
+    policy: "📺 YouTube"
+    behavior: classical
+
+  - name: Spotify
+    category: 流媒体
+    source: blackmatrix7
+    upstream_file: Spotify
+    clash_file: Spotify.yaml
+    sr_file: Spotify.list
+    policy: "🎵 Spotify"
+    behavior: classical
+
+  - name: TikTok
+    category: 流媒体
+    source: blackmatrix7
+    upstream_file: TikTok
+    clash_file: TikTok.yaml
+    sr_file: TikTok.list
+    policy: "🚀 节点选择"    # 组清单无专属组：跟随节点选择（docs/02 §2 组清单之外）
+    behavior: classical
+
+  - name: PrimeVideo
+    category: 流媒体
+    source: blackmatrix7
+    upstream_file: PrimeVideo
+    clash_file: PrimeVideo.yaml
+    sr_file: PrimeVideo.list
+    policy: "🚀 节点选择"
+    behavior: classical
+
+  # ---- 7. 大厂 → 对应 select 组 ----
+  - name: GitHub
+    category: 大厂
+    source: blackmatrix7
+    upstream_file: GitHub
+    clash_file: GitHub.yaml
+    sr_file: GitHub.list
+    policy: "📢 谷歌服务"
+    behavior: classical
+    note: 大厂四件套里 GitHub 无专属组，归入谷歌服务组（默认 ♻️ 常规自动，可手动改）
+
+  - name: Google
+    category: 大厂
+    source: blackmatrix7
+    upstream_file: Google
+    clash_file: Google.yaml
+    sr_file: Google.list
+    policy: "📢 谷歌服务"
+    behavior: classical
+
+  - name: Microsoft
+    category: 大厂
+    source: blackmatrix7
+    upstream_file: Microsoft
+    clash_file: Microsoft.yaml
+    sr_file: Microsoft.list
+    policy: "Ⓜ️ 微软服务"
+    behavior: classical
+
+  - name: Apple
+    category: 大厂
+    source: blackmatrix7
+    upstream_file: Apple
+    clash_file: Apple.yaml
+    sr_file: Apple.list
+    policy: "🍎 苹果服务"
+    behavior: classical
+
+  # ---- 8. 国际大类 → 节点选择 ----
+  - name: Global
+    category: 国际大类
+    source: blackmatrix7
+    upstream_file: Global
+    upstream_clash: Global_Domain               # 主 Global.yaml 为残缺桩；_Domain 双格式完整且等价（payload 纯域名）
+    upstream_sr: Global_Domain
+    clash_file: Global.yaml
+    sr_file: Global.list
+    policy: "🚀 节点选择"
+    behavior: domain
+    note: 校准（2026-09-27）：上游主 yaml/.list 均为残缺桩，改用 _Domain 变体，behavior 相应由 classical 调整为 domain
+
+  - name: ProxyGFWlist
+    category: 国际大类
+    source: blackmatrix7
+    upstream_file: Proxy                        # 校准（2026-09-27 实测）：blackmatrix7 无 ProxyGFWlist 目录，GFW 聚合实际位于 rule/Proxy
+    clash_file: ProxyGFWlist.yaml
+    sr_file: ProxyGFWlist.list
+    policy: "🚀 节点选择"
+    behavior: classical
+
+  # ---- 9-10. 直连（Loyalsoldier txt payload，rulesync 转双格式缓存）----
+  - name: ChinaMax
+    category: 直连
+    source: blackmatrix7
+    upstream_file: ChinaMax
+    upstream_clash: ChinaMax_Domain             # 主 ChinaMax.yaml 为残缺桩（仅 1.1KB）；_Domain 双格式完整（payload 纯域名）
+    upstream_sr: ChinaMax_Domain
+    clash_file: ChinaMax.yaml
+    sr_file: ChinaMax.list
+    policy: DIRECT
+    behavior: domain
+    note: 域名直连；blackmatrix7 有现成双格式，优先于 Loyalsoldier 兜底
+
+  - name: CNCIDR
+    category: 直连
+    source: loyalsoldier
+    upstream_file: cncidr.txt
+    clash_file: CNCIDR.yaml
+    sr_file: CNCIDR.list
+    policy: DIRECT
+    behavior: ipcidr
+    note: Loyalsoldier 原始为 txt（payload 行式），rulesync 转换为 yaml/list
+
+  - name: Lan
+    category: 直连
+    source: loyalsoldier
+    upstream_file: lancidr.txt
+    clash_file: Lan.yaml
+    sr_file: Lan.list
+    policy: DIRECT
+    behavior: ipcidr
+
+  - name: Download
+    category: 直连
+    source: blackmatrix7
+    upstream_file: Download
+    clash_file: Download.yaml
+    sr_file: Download.list
+    policy: DIRECT
+    behavior: classical
+    note: BT/PT 客户端等大下载直连（docs/02 §3）

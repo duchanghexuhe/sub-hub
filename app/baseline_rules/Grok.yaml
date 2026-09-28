@@ -1,0 +1,4 @@
+# 本文件由 sub-hub rulesync 依据 rules_manifest.yaml 的 domains 生成（内置自维护规则）
+# 请勿手工编辑；增删域名请改 rules_manifest.yaml 后重跑 build_baselines()
+payload:
+  - DOMAIN-SUFFIX,x.ai

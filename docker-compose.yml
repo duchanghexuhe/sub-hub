@@ -1,0 +1,21 @@
+# sub-hub — NAS 部署编排（惯例目录：/share/Container/sub-hub/）
+# 用法：把仓库放到 /share/Container/sub-hub 后执行
+#   docker-compose up -d --build
+services:
+  sub-hub:
+    build: .
+    image: sub-hub:latest
+    container_name: sub-hub
+    ports:
+      - "8399:8399"          # 管理页面/分发端点/规则分发（部署前确认宿主 8399 未被占用）
+    volumes:
+      - ./data:/app/data     # SQLite、密钥、token、产物版本、规则缓存、探测配置全部在此持久化
+    environment:
+      SUBHUB_HOST: 0.0.0.0
+      SUBHUB_PORT: 8399
+      SUBHUB_NAS_HOST: 192.168.31.10   # 构造分发链接用，按实际 NAS 局域网地址修改
+      # SUBHUB_REFRESH_MINUTES: 30     # 订阅刷新间隔（分钟）
+      # SUBHUB_MIRROR_HOURS: 6         # 规则镜像间隔（小时）
+      # SUBHUB_PURITY_HOUR: 4          # 纯净度每日扫描时刻（0-23 点）
+      # SUBHUB_SKIP_ANYTLS: "true"     # SR conf 跳过 anytls 节点（客户端 <6.3 不支持）
+    restart: unless-stopped

@@ -1,0 +1,16 @@
+# 构建上下文裁剪：镜像只需要 app/、rules_manifest.yaml、requirements.txt
+.venv
+data
+tests
+docs
+deploy
+.git
+.gitignore
+.zcode
+.pytest_cache
+**/__pycache__
+*.py[cod]
+Dockerfile
+.dockerignore
+docker-compose.yml
+README.md

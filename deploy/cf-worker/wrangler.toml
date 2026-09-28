@@ -1,0 +1,9 @@
+name = "sub-hub-mirror"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+# KV 绑定：worker.js 从 env.SUBHUB_MIRROR 读取。
+# id 换成你自己的 namespace id（见 README.md 第 2 步）。
+[[kv_namespaces]]
+binding = "SUBHUB_MIRROR"
+id = "<你的 KV namespace id>"
