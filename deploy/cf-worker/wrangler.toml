@@ -6,4 +6,4 @@ compatibility_date = "2024-09-01"
 # id 换成你自己的 namespace id（见 README.md 第 2 步）。
 [[kv_namespaces]]
 binding = "SUBHUB_MIRROR"
-id = "<你的 KV namespace id>"
+id = "6bbf7b3862fd482db332d2589d3d491d"

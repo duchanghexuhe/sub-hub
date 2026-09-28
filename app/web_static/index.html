@@ -47,6 +47,14 @@ section h2 .hint{font-weight:400;font-size:12px;color:var(--muted)}
 form.inline{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
 form.inline input[name=name]{width:120px}
 form.inline input[name=url]{flex:1;min-width:260px}
+/* ---------- 公网镜像：分字段凭据表单 ---------- */
+.mirror-toprow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.mirror-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px 12px;margin:8px 0 0}
+.mirror-grid[hidden]{display:none}
+.mirror-grid label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);min-width:0}
+.mirror-grid input{width:100%}
+.mirror-hint{font-size:12px;color:var(--muted);margin:6px 0 0}
+.mirror-hint .ok{color:var(--ok)}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--muted);font-weight:500;white-space:nowrap}
@@ -81,11 +89,49 @@ pre.preview{background:#10131b;border:1px solid var(--line);border-radius:6px;pa
 .stab-bar.sm{min-width:120px}
 .stab-bar.sm i{height:9px}
 .stab-cell .muted{margin-top:2px}
+/* ---------- 节点总表：跨分组列对齐 ---------- */
+/* 各分组各自成表，auto 布局按本组内容定宽会互相错位；fixed + 统一列宽保证所有分组横向对齐。
+   仅桌面表格布局启用（≤640px 表格转卡片流式排列，无需对齐，也避免限宽撑破卡片） */
+@media (min-width:641px){
+  #node-groups table,#node-filtered-body table{table-layout:fixed}
+  #node-groups th:nth-child(1),#node-groups td:nth-child(1),#node-filtered-body td:nth-child(1){width:30%}
+  #node-groups th:nth-child(2),#node-groups td:nth-child(2),#node-filtered-body td:nth-child(2){width:10%}
+  #node-groups th:nth-child(3),#node-groups td:nth-child(3),#node-filtered-body td:nth-child(3){width:26%}
+  #node-groups th:nth-child(4),#node-groups td:nth-child(4),#node-filtered-body td:nth-child(4){width:21%}
+  #node-groups th:nth-child(5),#node-groups td:nth-child(5),#node-filtered-body td:nth-child(5){width:13%}
+  #node-groups .stab-cell,#node-filtered-body .stab-cell{min-width:0}
+  #node-groups td.t,#node-groups td.muted,#node-filtered-body td.t,#node-filtered-body td.muted{overflow-wrap:anywhere}
+  /* 已过滤表套在带内边距的 div 里，参考宽度会比分组表窄一档；
+     去掉容器左右内边距、让表格自带同款内边距，列宽参考面与分组表对齐 */
+  #node-filtered-body{padding-left:0;padding-right:0}
+  #node-filtered-body>table{padding:4px 8px}
+}
 #toast{position:fixed;right:16px;bottom:16px;display:grid;gap:8px;z-index:99}
 #toast div{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--acc);padding:8px 14px;border-radius:6px;max-width:420px}
 #toast div.err{border-left-color:var(--bad)}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--muted);border-top-color:transparent;border-radius:50%;animation:sp 1s linear infinite;vertical-align:-2px}
 @keyframes sp{to{transform:rotate(360deg)}}
+/* ---------- 帮助问号按钮与教程弹窗 ---------- */
+.help-btn{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;padding:0;font-size:11px;line-height:1;color:var(--muted);background:var(--panel2);flex:none}
+.help-btn:hover{border-color:var(--acc);color:var(--acc)}
+.modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:90;display:flex;align-items:center;justify-content:center;padding:16px}
+.modal-mask[hidden]{display:none}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:10px;max-width:680px;width:100%;max-height:min(82vh,680px);display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(0,0,0,.45)}
+.modal-hd{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:600}
+.modal-hd .spacer{flex:1}
+.modal-bd{padding:12px 16px;overflow:auto;font-size:13px}
+.modal-bd h3{font-size:13px;margin:14px 0 6px}
+.modal-bd h3:first-child{margin-top:0}
+.modal-bd p{margin:6px 0}
+.modal-bd ol{margin:6px 0;padding-left:20px}
+.modal-bd li{margin:4px 0}
+.modal-bd table{border-collapse:collapse;width:100%;font-size:12px;margin:8px 0}
+.modal-bd th,.modal-bd td{border:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}
+.modal-bd th{background:var(--panel2);font-weight:600}
+.modal-bd code{background:#10131b;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12px;word-break:break-all}
+.modal-bd pre{background:#10131b;border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:12px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:6px 0}
+.modal-bd .warnbox{background:rgba(224,168,60,.1);border:1px solid var(--warn);border-radius:6px;padding:8px 10px;color:var(--warn);font-size:12px;margin:8px 0}
+.modal-bd .mut{color:var(--muted);font-size:12px}
 section h2{flex-wrap:wrap}
 /* ---------- 移动端适配（≤640px）：表格转卡片、防溢出、触控与 iOS 聚焦放大修复 ---------- */
 @media (max-width:640px){
@@ -98,7 +144,7 @@ section h2{flex-wrap:wrap}
   .cards{grid-template-columns:1fr}
   form.inline input[name=name]{width:96px}
   form.inline input[name=url]{min-width:0;flex:1 1 160px}
-  form.inline input[name=credentials]{min-width:0}
+  .mirror-grid{grid-template-columns:1fr}
   /* iOS：输入框字号 <16px 聚焦时页面会自动放大 */
   input,select{font-size:16px}
   button{padding:8px 14px;min-height:36px}
@@ -198,20 +244,87 @@ section h2{flex-wrap:wrap}
   </form>
   <h2 style="font-size:13px">规则源状态</h2>
   <div class="stat" id="rules-status">加载中…</div>
-  <h2 style="font-size:13px;margin-top:12px">公网镜像（可选）</h2>
+  <h2 style="font-size:13px;margin-top:12px">公网镜像（可选）
+    <button type="button" class="help-btn" id="btn-mirror-help" title="配置教程" aria-label="公网镜像配置教程">?</button>
+  </h2>
   <div class="stat" id="mirror-status"></div>
-  <form class="inline" id="mirror-form">
-    <select name="provider">
-      <option value="cf-kv">CF Workers + KV（推荐）</option>
-      <option value="github">GitHub 公库随机路径</option>
-    </select>
-    <input name="credentials" placeholder='凭据（JSON，如 {"token":"…","kv":"…"}）' style="flex:1;min-width:240px">
-    <label class="muted"><input type="checkbox" name="enabled"> 启用</label>
-    <button type="submit">保存并立即试推</button>
+  <div id="mirror-links"></div>
+  <form id="mirror-form">
+    <div class="mirror-toprow">
+      <select name="provider">
+        <option value="cf-kv">CF Workers + KV（推荐）</option>
+        <option value="github">GitHub 公库随机路径</option>
+      </select>
+      <label class="muted"><input type="checkbox" name="enabled"> 启用</label>
+      <button type="submit">保存并立即试推</button>
+    </div>
+    <div class="mirror-grid" id="mirror-fields-cf-kv">
+      <label>url_token（第 2 步生成）
+        <input name="cf_url_token" placeholder="随机串，须与 Worker 的 MIRROR_TOKEN 一致" autocomplete="off"></label>
+      <label>api_token（第 5 步创建）
+        <input name="cf_api_token" placeholder="Cloudflare API Token，KV Storage: Edit" autocomplete="off"></label>
+      <label>account_id（第 5 步查看）
+        <input name="cf_account_id" placeholder="32 位，Workers &amp; Pages 右侧 Account details" autocomplete="off"></label>
+      <label>namespace_id（第 3 步输出）
+        <input name="cf_namespace_id" placeholder="wrangler kv namespace create 的 id" autocomplete="off"></label>
+      <label>worker_base（第 4 步部署输出）
+        <input name="cf_worker_base" placeholder="https://sub-hub-mirror.你的子域.workers.dev" autocomplete="off"></label>
+    </div>
+    <div class="mirror-grid" id="mirror-fields-github" hidden>
+      <label>api_token（Fine-grained Token）
+        <input name="gh_api_token" placeholder="仓库限定，Contents: Read and write" autocomplete="off"></label>
+      <label>owner（用户名）
+        <input name="gh_owner" placeholder="仓库所有者" autocomplete="off"></label>
+      <label>repo（仓库名）
+        <input name="gh_repo" placeholder="公开仓库" autocomplete="off"></label>
+      <label>branch（可选）
+        <input name="gh_branch" placeholder="默认 main" autocomplete="off"></label>
+    </div>
+    <p class="mirror-hint" id="mirror-cred-hint"></p>
   </form>
 </section>
 
 </main>
+
+<div class="modal-mask" id="mirror-help" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mirror-help-title">
+    <div class="modal-hd"><span id="mirror-help-title">公网镜像配置教程</span><span class="spacer"></span><button type="button" data-close>关闭</button></div>
+    <div class="modal-bd">
+      <p>作用：把渲染好的配置推送到公网可读的镜像地址，外网客户端订阅该地址即可自动更新，NAS 本身无需任何公网条件。推送时机：产物内容变化后自动推送，内容无变化不重复推送。</p>
+      <div class="warnbox">凭证告知：配置文件内含全部节点凭证，推送到第三方平台即视为托管给该平台（镜像侧有 URL token 保护，但平台可见内容）。请知晓并接受后再启用。</div>
+
+      <h3>方式一：Cloudflare Workers + KV（推荐，全程在自己电脑上操作，一次性）</h3>
+      <p>思路：把 Worker（一小段公网读取程序）和 KV（云端键值存储）部署到 Cloudflare 免费版；NAS 把配置推上去，外网客户端订阅 Worker 的网址。</p>
+      <table>
+        <tr><th>名字</th><th>谁生成</th><th>干什么用</th></tr>
+        <tr><td><b>url_token</b><br>（即 Worker 里的 <code>MIRROR_TOKEN</code>）</td><td>你自己随手生成的随机串</td><td>藏在订阅网址里当门禁，没它一律 404</td></tr>
+        <tr><td><b>api_token</b></td><td>Cloudflare 网页上创建</td><td>sub-hub 往 KV 写文件的钥匙；只存 NAS 本地，不进网址</td></tr>
+      </table>
+      <ol>
+        <li><b>准备</b>：注册 Cloudflare（免费版每天 10 万次请求，个人足够）；电脑装 Node.js ≥ 18，然后 <code>npm install -g wrangler</code>、<code>wrangler login</code>（会弹浏览器，点 Allow）。</li>
+        <li><b>生成 url_token</b>：PowerShell 执行<pre>-join ((1..32) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })</pre>（或 Mac/Linux 用 <code>openssl rand -hex 16</code>），输出保存好 → 填入表单「url_token」。</li>
+        <li><b>创建 KV 存储</b>：<code>wrangler kv namespace create SUBHUB_MIRROR</code>，输出里的 <code>id</code> → 填入「namespace_id」；同时把它填进仓库 <code>deploy/cf-worker/wrangler.toml</code> 的 <code>id =</code> 行（替换占位符）。</li>
+        <li><b>部署 Worker</b>：<pre>cd deploy/cf-worker
+wrangler secret put MIRROR_TOKEN   # 提示输入时，粘贴第 2 步的 url_token
+wrangler deploy</pre>
+          输出末尾的网址（形如 <code>https://sub-hub-mirror.&lt;你的子域&gt;.workers.dev</code>）→ 填入「worker_base」。</li>
+        <li><b>创建 api_token</b>：Dashboard → 右上角头像 → My Profile → API Tokens → Create Token → 权限选 <code>Account → Workers KV Storage → Edit</code>，生成后 → 填入「api_token」；再到 <b>Workers &amp; Pages</b> 页面右侧「Account details」复制 Account ID → 填入「account_id」。注意面板文字可能截断显示（带省略号），从浏览器地址栏 <code>dash.cloudflare.com/&lt;32位ID&gt;/…</code> 复制更稳妥。</li>
+        <li><b>回本页</b>：提供方选「CF Workers + KV」，五个输入框按各自身旁标注的步骤号填好 → 勾选「启用」→ 点「保存并立即试推」。凭据只存 NAS 本地、页面不回显；以后留空输入框 = 保持原值。</li>
+        <li><b>验收</b>：浏览器访问 <code>https://&lt;worker_base&gt;/&lt;url_token&gt;/clash.yaml</code> 能看到配置内容；把 token 改错应返回 404（与文件不存在表现一致，不泄露存在性）。把外网客户端订阅地址换成该 URL，之后产物变化会自动推送更新。</li>
+      </ol>
+
+      <h3>方式二：GitHub 公库随机路径</h3>
+      <ol>
+        <li>准备：一个 GitHub <b>公开</b>仓库 + API Token（Fine-grained：仓库限定到该库，权限 <code>Contents: Read and write</code>）。</li>
+        <li>提供方选「GitHub 公库随机路径」，填「api_token / owner / repo」三个输入框（branch 留空默认 main）→ 勾选「启用」→「保存并立即试推」。首次推送自动生成 64 位随机路径并固定，订阅 URL 形如 <code>https://raw.githubusercontent.com/&lt;owner&gt;/&lt;repo&gt;/&lt;branch&gt;/&lt;随机路径&gt;/clash.yaml</code>。仅靠路径保密，请勿泄露完整 URL。</li>
+        <li>注意：客户端拉取 raw.githubusercontent.com 国内直连不稳定，建议客户端本身走代理拉取。</li>
+      </ol>
+
+      <p class="mut">已保存凭据一律不回显（状态栏只显示「已配置」）。轮换 token、下线镜像等维护操作见仓库 <code>deploy/cf-worker/README.md</code>。</p>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -644,26 +757,92 @@ async function loadMirror(){
   try{
     const data = await api("/api/mirror");
     const s = data.settings || {};
+    const f = $("#mirror-form");
+    f.provider.value = s.provider || "cf-kv";
+    syncMirrorFields();
+    f.enabled.checked = !!s.enabled;
+    mirrorCredConfigured = !!s.credentials_configured;
+    $("#mirror-cred-hint").innerHTML = mirrorCredConfigured
+      ? '<span class="ok">✓ 凭据已保存</span>（只存 NAS 本地、不回显；留空输入框 = 保持原值，要换就填新值）'
+      : "尚未配置凭据：点标题旁 ？ 查看分步教程。";
     $("#mirror-status").innerHTML = s.enabled
-      ? `<span class="badge ok">已启用</span><span>提供方：${esc(s.provider)}</span><span>公网地址：${s.url ? `<a href="${esc(s.url)}">${esc(s.url)}</a>` : "尚未推送"}</span>` +
-        (s.last_push ? `<span>上次推送：${fmtTime(s.last_push.pushed_at || s.last_push)}${s.last_push && s.last_push.error ? ' <span class="badge bad">'+esc(s.last_push.error)+"</span>" : ""}</span>` : "")
+      ? `<span class="badge ok">已启用</span><span>提供方：${esc(s.provider)}</span>` +
+        (s.last_push ? `<span>上次推送：${fmtTime(s.last_push.pushed_at)}</span>` : "") +
+        (s.last_result && s.last_result.error ? `<span class="badge bad">${esc(s.last_result.error)}</span>` : "")
       : '<span class="muted">未启用。填写凭据并保存后，产物变化会自动推送到公网镜像。</span>';
+    // 公网订阅链接：GET /api/mirror 回显 last_push.urls（不回显任何凭据）
+    const linksBox = $("#mirror-links");
+    linksBox.innerHTML = "";
+    const mirrorUrls = (s.last_push && s.last_push.urls) || s.urls || {};
+    const mirrorLabels = [
+      ["clash.yaml", "Clash Verge（mihomo）"],
+      ["shadowrocket.conf", "Shadowrocket"],
+      ["clash-offline.yaml", "clash 离线包"],
+      ["shadowrocket-offline.conf", "SR 离线包"],
+    ];
+    if(s.enabled && Object.keys(mirrorUrls).length){
+      linksBox.innerHTML = '<p class="mirror-hint"><span class="ok">公网订阅地址（外网客户端直接填）：</span></p>';
+      for(const [key, label] of mirrorLabels){
+        const url = mirrorUrls[key];
+        if(!url) continue;
+        const row = document.createElement("div");
+        row.className = "linkrow";
+        row.innerHTML = `<span class="muted" style="width:150px">${esc(label)}</span><input readonly value="${esc(url)}"><button class="copy">复制</button>`;
+        row.querySelector("input").addEventListener("focus", e => e.target.select());
+        row.querySelector("button").addEventListener("click", () => {
+          navigator.clipboard.writeText(url).then(() => toast("链接已复制"), () => { row.querySelector("input").select(); document.execCommand("copy"); toast("链接已复制"); });
+        });
+        linksBox.appendChild(row);
+      }
+    } else if(s.enabled && s.credentials_configured){
+      linksBox.innerHTML = '<p class="mirror-hint">尚未推送：点「保存并立即试推」立即生成公网地址，之后产物变化时自动推送。</p>';
+    }
   }catch(e){ $("#mirror-status").innerHTML = `<span class="muted">镜像模块状态不可用：${esc(e.message)}</span>`; }
+}
+// 提供方切换 → 显示对应输入框组；凭据分字段填写（留空 = 保持服务端已存值）
+function syncMirrorFields(){
+  const p = $("#mirror-form").provider.value;
+  $("#mirror-fields-cf-kv").hidden = p !== "cf-kv";
+  $("#mirror-fields-github").hidden = p !== "github";
+}
+$("#mirror-form").provider.addEventListener("change", syncMirrorFields);
+let mirrorCredConfigured = false;   // 由 loadMirror 依据后端回显的「已配置」布尔更新
+function collectMirrorCreds(){
+  const f = $("#mirror-form");
+  const fields = f.provider.value === "cf-kv"
+    ? [["api_token", f.cf_api_token], ["account_id", f.cf_account_id], ["namespace_id", f.cf_namespace_id], ["url_token", f.cf_url_token], ["worker_base", f.cf_worker_base]]
+    : [["api_token", f.gh_api_token], ["owner", f.gh_owner], ["repo", f.gh_repo], ["branch", f.gh_branch]];
+  const creds = {};
+  for(const [key, input] of fields){ const v = input.value.trim(); if(v) creds[key] = v; }
+  return creds;
 }
 $("#mirror-form").addEventListener("submit", (ev) => {
   ev.preventDefault();
   const f = ev.target;
-  let creds = null;
-  const raw = f.credentials.value.trim();
-  if(raw){ try{ creds = JSON.parse(raw); }catch(e){ toast("凭据不是合法 JSON", true); return; } }
-  guard(f.querySelector("button"), async () => {
-    const r = await api("/api/mirror", {method:"POST", body:{provider: f.provider.value, credentials: creds, enabled: f.enabled.checked}});
+  const creds = collectMirrorCreds();
+  if(!Object.keys(creds).length && !mirrorCredConfigured){
+    toast("请先填写凭据（点标题旁 ？ 查看配置教程）", true);
+    return;
+  }
+  guard(f.querySelector("button[type=submit]"), async () => {
+    const r = await api("/api/mirror", {method:"POST", body:{provider: f.provider.value, credentials: Object.keys(creds).length ? creds : null, enabled: f.enabled.checked}});
     if(r.push && r.push.ok) toast("已保存并试推成功：" + (r.push.url || ""));
     else toast("已保存，但试推失败：" + ((r.push && r.push.error) || "未知原因"), true);
+    for(const input of f.querySelectorAll(".mirror-grid:not([hidden]) input")) input.value = "";
     await loadMirror();
   });
 });
 $("#btn-reload").addEventListener("click", () => guard($("#btn-reload"), reload));
+
+// 公网镜像配置教程弹窗：问号打开；遮罩、关闭按钮、ESC 关闭
+const mirrorHelp = $("#mirror-help");
+$("#btn-mirror-help").addEventListener("click", () => { mirrorHelp.hidden = false; });
+mirrorHelp.addEventListener("click", (ev) => {
+  if(ev.target === mirrorHelp || ev.target.closest("[data-close]")) mirrorHelp.hidden = true;
+});
+document.addEventListener("keydown", (ev) => {
+  if(ev.key === "Escape" && !mirrorHelp.hidden) mirrorHelp.hidden = true;
+});
 
 async function reload(){
   // 先拉稳定性 + 纯净度上下文（节点总表融合渲染依赖），再并行刷新其余板块

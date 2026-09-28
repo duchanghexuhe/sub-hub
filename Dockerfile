@@ -35,7 +35,10 @@ RUN set -eux; \
 # 全部可覆盖：MIHOMO_VERSION / MIHOMO_ARCH / MIHOMO_BASE_URL / MIHOMO_MIRRORS，
 # 或直接用 MIHOMO_URL 指定完整下载地址（指定后不再走镜像链）。
 ARG MIHOMO_VERSION=v1.19.31
-ARG MIHOMO_ARCH=linux-amd64
+# NAS 宿主 CPU（Celeron J4125）不支持 x86-64 v3 微架构（无 AVX2），官方 linux-amd64
+# 构建（GOAMD64=v3）一启动即退出（"requires v3 microarchitecture"），探测实例全灭；
+# 必须用 compatible 构建（GOAMD64=v1），新 CPU 也能跑，仅轻微性能损失。
+ARG MIHOMO_ARCH=linux-amd64-compatible
 ARG MIHOMO_BASE_URL=https://github.com/MetaCubeX/mihomo/releases/download
 ARG MIHOMO_MIRRORS="https://ghfast.top/ https://gh-proxy.com/ https://ghproxy.net/"
 ARG MIHOMO_URL=
