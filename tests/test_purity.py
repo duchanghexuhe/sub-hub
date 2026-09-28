@@ -381,7 +381,9 @@ class TestIpApiProvider:
             provider.lookup()   # 限速门闩与是否走代理无关；代理路径由本地假代理用例覆盖
         gaps = [later - earlier for earlier, later in zip(times, times[1:])]
         assert len(times) == 3
-        assert gaps and all(gap >= 1.39 for gap in gaps)   # 留 10ms 调度误差
+        # Windows 计时器粒度 ~15.6ms：sleep(1.4) 的实测间隔可能提前一个 tick 醒，
+        # 容差放宽到 100ms（≈6 tick）——校验「不快于 45 req/min 的量级」足矣
+        assert gaps and all(gap >= 1.30 for gap in gaps)
         assert time.monotonic() - started < 20
 
     def test_retries_once_on_429_then_succeeds(self):

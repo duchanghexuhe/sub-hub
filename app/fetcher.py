@@ -20,6 +20,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import time
 
 import httpx
 
@@ -36,6 +37,9 @@ _USERINFO_KEYS = frozenset({"upload", "download", "total", "expire"})
 _CACHE_KEEP = 3
 _CACHE_TS_FORMAT = "%Y%m%dT%H%M%S%f"          # 定宽可排序：8+1+12 位
 _CACHE_TS_RE = re.compile(r"(\d{8}T\d{12})")
+_CACHE_TS_SPIN_LIMIT = 200
+"""撞名自旋上限（次×1ms）：Windows 计时器粒度可达 ~16ms，200ms 足够跨过
+数个时间刻度；超限仍未让出文件名则按旧语义覆盖（退化而非卡死）。"""
 # 文件名安全化：仅替换文件系统非法字符与控制字符（保留中文，保证订阅名唯一性）
 _UNSAFE_FS_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
 
@@ -224,10 +228,18 @@ def save_cache(config: AppConfig, sub_name: str, content: bytes) -> Path:
     """原始响应体快照到 data/cache/<订阅名>-<时间戳>.yaml，每订阅只留最近 3 份。
 
     时间戳为本地时间定宽格式（%Y%m%dT%H%M%S%f），字典序即时序；返回快照路径。
+    Windows 计时器粒度可达 ~16ms，同刻度内连续保存会撞同名快照互相覆盖——
+    撞名时自旋等下一个时间刻度，保住「留 3 份、文件名即时序」的契约。
     """
     safe = _safe_cache_name(sub_name)
     ts = datetime.now().strftime(_CACHE_TS_FORMAT)
     path = config.cache_dir / f"{safe}-{ts}.yaml"
+    for _ in range(_CACHE_TS_SPIN_LIMIT):
+        if not path.exists():
+            break
+        time.sleep(0.001)
+        ts = datetime.now().strftime(_CACHE_TS_FORMAT)
+        path = config.cache_dir / f"{safe}-{ts}.yaml"
     atomic_write_bytes(path, content)
     _prune_cache(config.cache_dir, safe)
     logger.info("订阅「%s」快照已保存：%s（%d 字节）", sub_name, path.name, len(content))
