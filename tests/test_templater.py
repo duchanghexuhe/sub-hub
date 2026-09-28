@@ -369,6 +369,83 @@ def test_claude_groups_full_pool_without_purity(nodes: list[Node], config: AppCo
     assert sorted(groups[G_CLAUDE_BACKUP]["proxies"]) == real
 
 
+# ---------------------------------------------------------------- 稳定性融合（health.stability_index）
+
+def _stat(name: str, sub: str, *, down_streak: int = 0,
+          ok_rate: float = 1.0, avg_delay: int | None = 200) -> dict:
+    """构造 health.stability_index 的摘要 dict（hard_down 线 = 连续失败 3 轮）。"""
+    return {"node_name": name, "source_sub": sub, "sample_count": 96,
+            "ok_rate": ok_rate, "avg_delay": avg_delay,
+            "down_streak": down_streak, "hard_down": down_streak >= 3}
+
+
+def test_url_test_groups_drop_hard_down_nodes(nodes: list[Node], config: AppConfig):
+    """窗口内连续失败判死的节点从 url-test 自动选路组剔除；手动 select 主组保留全量。"""
+    stability = [_stat("🇭🇰 香港 01", "a", down_streak=3, ok_rate=0.5)]
+    groups = {g["name"]: g for g in build_groups(nodes, config=config, stability=stability)}
+    assert "🇭🇰 香港 01" not in groups["🇭🇰 香港"]["proxies"]
+    assert "🇭🇰 香港 01" not in groups[G_AUTO]["proxies"]
+    assert "🇭🇰 香港 01" not in groups[G_TG]["proxies"]
+    assert "🇭🇰 香港 IEPL 专线 02" in groups["🇭🇰 香港"]["proxies"]   # 存活同区节点不受影响
+    assert "🇭🇰 香港 01" in groups[G_MAIN]["proxies"]                # 手动选择列表不减员
+
+
+def test_region_group_falls_back_when_all_dead(nodes: list[Node], config: AppConfig):
+    """整区节点判死：组不可空置，成员回退 [♻️ 常规自动]（与无美国节点同语义）。"""
+    stability = [_stat("🇭🇰 香港 01", "a", down_streak=4, ok_rate=0.2),
+                 _stat("🇭🇰 香港 IEPL 专线 02", "a", down_streak=3, ok_rate=0.3)]
+    groups = {g["name"]: g for g in build_groups(nodes, config=config, stability=stability)}
+    assert groups["🇭🇰 香港"]["proxies"] == [G_AUTO]
+
+
+def test_claude_order_alive_first_on_same_rank(nodes: list[Node], config: AppConfig):
+    """同评分层：存活的 3 分节点默认选中，判死者沉底但保留（准入只看纯净度）。"""
+    purity = [
+        PurityResult(node_name="🇺🇸 美国 洛杉矶 家庭宽带 01", source_sub="a",
+                     checked_at="2026-09-27T04:00:00.000000", claude_rank=3,
+                     ip_type="residential"),
+        PurityResult(node_name="🇺🇸 美国 洛杉矶 家庭宽带 01 [b]", source_sub="b",
+                     checked_at="2026-09-27T04:00:00.000000", claude_rank=3,
+                     ip_type="residential"),
+    ]
+    stability = [_stat("🇺🇸 美国 洛杉矶 家庭宽带 01 [b]", "b",
+                       down_streak=3, ok_rate=0.4)]
+    real = [n for n in nodes if not n.filtered]
+    groups = {g["name"]: g for g in build_groups(
+        real, config=config, purity=purity, stability=stability)}
+    members = groups[G_CLAUDE]["proxies"]
+    assert members[0] == "🇺🇸 美国 洛杉矶 家庭宽带 01"        # 存活者即 select 默认选中
+    assert members[-1] == "🇺🇸 美国 洛杉矶 家庭宽带 01 [b]"   # 判死者沉底
+    assert groups[G_CLAUDE_BACKUP]["proxies"] == members     # 备援 fallback 同池同序
+
+
+def test_claude_order_by_success_rate_on_same_rank(nodes: list[Node], config: AppConfig):
+    """同评分且都存活：成功率升序决胜（均延为次级），采样数据自动定序。"""
+    purity = [
+        PurityResult(node_name="🇺🇸 美国 洛杉矶 家庭宽带 01", source_sub="a",
+                     checked_at="2026-09-27T04:00:00.000000", claude_rank=3,
+                     ip_type="residential"),
+        PurityResult(node_name="🇺🇸 美国 洛杉矶 家庭宽带 01 [b]", source_sub="b",
+                     checked_at="2026-09-27T04:00:00.000000", claude_rank=3,
+                     ip_type="residential"),
+    ]
+    stability = [_stat("🇺🇸 美国 洛杉矶 家庭宽带 01", "a", ok_rate=0.7, avg_delay=300),
+                 _stat("🇺🇸 美国 洛杉矶 家庭宽带 01 [b]", "b", ok_rate=0.95, avg_delay=180)]
+    ordered = [n.name for n in order_claude_candidates(
+        [n for n in nodes if not n.filtered], purity, stability)]
+    assert ordered[0] == "🇺🇸 美国 洛杉矶 家庭宽带 01 [b]"
+    assert ordered[1] == "🇺🇸 美国 洛杉矶 家庭宽带 01"
+
+
+def test_stability_empty_keeps_baseline(nodes: list[Node], config: AppConfig):
+    """无采样数据（stability 为空/None）时与不传完全一致：缺数据绝不改变行为。"""
+    baseline = {g["name"]: g["proxies"] for g in build_groups(nodes, config=config)}
+    for stability in ([], None):
+        merged = {g["name"]: g["proxies"]
+                  for g in build_groups(nodes, config=config, stability=stability)}
+        assert merged == baseline
+
+
 # ---------------------------------------------------------------- 常规自动：低倍率
 
 def _rate_node(name: str, rate: float) -> Node:

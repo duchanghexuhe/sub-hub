@@ -11,6 +11,8 @@
   「分发可用性 > 数据新鲜度」，绝不向客户端下发空配置或坏配置；
 - 渲染时读取库内最新纯净度结果传入 templater，驱动 Claude 专用/备援组
   「评分降序、住宅恒在机房前」排序（docs/02 §2；无数据时静态序回退）；
+  同时注入 24h 稳定性摘要：自动选路组剔除连续失败判死节点、Claude 组
+  同评分内存活优先（采样数据自动驱动策略，无需人工挑选）；
 - 规则集存在「上游/旧缓存/内置基线三者全缺」的空占位文件时拒绝发布
   （docs/01 安全网：空 ChinaMax/CNCIDR 会把国内流量全部改道代理）；
 - 渲染或校验任一失败 → 拒绝发布、沿用上一版；有效节点数为 0 → 拒绝发布空配置；
@@ -440,25 +442,56 @@ def _placeholder_rule_names(config: AppConfig) -> list[str]:
         return []
 
 
+def _stability_for_render(store: Store) -> list[dict]:
+    """24h 稳定性摘要列表（templater 策略融合的输入）。
+
+    health 模块缺失（部署不完整）或索引构建异常时返回空列表 = 本轮渲染
+    不融合稳定度，行为与无采样数据完全一致（旁路安全网，绝不影响发布）。
+    """
+    try:
+        health = _import_stage("health")
+    except ModuleNotFoundError:
+        logger.info("health 模块未部署，渲染不融合节点稳定性")
+        return []
+    try:
+        index = health.stability_index(store, window_hours=health.STABILITY_WINDOW_HOURS)
+    except Exception:
+        logger.warning("稳定性索引构建失败，本轮渲染不融合节点稳定性", exc_info=True)
+        return []
+    rows = list(index.values())
+    dead = sum(1 for r in rows if r.get("hard_down"))
+    logger.info("稳定性融合：窗口内采样节点 %d 个，其中判死 %d 个", len(rows), dead)
+    return rows
+
+
 def _render_artifacts(config: AppConfig, store: Store, nodes: list[Node]) -> dict[str, str]:
     """渲染 4 份产物（主版本 + 离线自包含版）。渲染失败向上抛，由调用方转为错误状态。
 
     纯净度数据回灌（docs/02 §2）：读取库内最新检测结果传入渲染，驱动
     Claude 专用/备援组「评分降序、住宅恒在机房前」排序；尚无检测数据时
     templater 按静态序回退（实测数据优先于节点名猜测）。
+    稳定性数据回灌：读取 24h 健康采样摘要传入渲染，自动选路组剔除连续
+    失败判死的节点、Claude 组同评分内存活优先——纯净度 + 稳定性共同驱动
+    策略，无需人工挑选；无采样数据时渲染行为不变。
     """
     templater = _import_stage("templater")
     rules = templater.load_rules_manifest()
     purity = store.latest_purity_results()
+    stability = _stability_for_render(store)
     return {
         "clash.yaml": templater.render_clash(nodes, config=config, rules=rules,
-                                             offline=False, purity=purity),
+                                             offline=False, purity=purity,
+                                             stability=stability),
         "shadowrocket.conf": templater.render_sr_conf(nodes, config=config, rules=rules,
-                                                      offline=False, purity=purity),
+                                                      offline=False, purity=purity,
+                                                      stability=stability),
         "clash-offline.yaml": templater.render_clash(nodes, config=config, rules=rules,
-                                                     offline=True, purity=purity),
-        "shadowrocket-offline.conf": templater.render_sr_conf(nodes, config=config, rules=rules,
-                                                              offline=True, purity=purity),
+                                                     offline=True, purity=purity,
+                                                     stability=stability),
+        "shadowrocket-offline.conf": templater.render_sr_conf(nodes, config=config,
+                                                              rules=rules, offline=True,
+                                                              purity=purity,
+                                                              stability=stability),
     }
 
 

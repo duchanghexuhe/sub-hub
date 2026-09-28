@@ -149,6 +149,28 @@ def test_history_report_empty(store):
     assert rep["nodes"] == [] and rep["sample_total"] == 0
 
 
+def test_stability_index_flags_hard_down(store):
+    """渲染融合索引：按 (source_sub, node_name) 索引；连续失败 ≥3 判 hard_down。"""
+    store.save_health_samples([
+        # 节点 A（sub t）：尾部连续失败 3 轮 → hard_down
+        _sample("A", 45, 100), _sample("A", 30, None),
+        _sample("A", 15, None), _sample("A", 5, None),
+        # 节点 B（sub u）：全达 → 正常
+        _sample("B", 10, 120, sub="u"),
+    ])
+    index = health.stability_index(store, window_hours=24)
+    assert set(index) == {("t", "A"), ("u", "B")}
+    a, b = index[("t", "A")], index[("u", "B")]
+    assert a["hard_down"] is True and a["down_streak"] == 3 and a["ok_rate"] == 0.25
+    assert b["hard_down"] is False and b["avg_delay"] == 120
+    # 投影不含逐样本序列（紧凑索引，templater 消费）
+    assert "samples" not in a
+
+
+def test_stability_index_empty_without_samples(store):
+    assert health.stability_index(store) == {}
+
+
 # ---------------------------------------------------------------- API 数据面
 
 def test_health_history_api(client, store):

@@ -76,6 +76,11 @@ pre.preview{background:#10131b;border:1px solid var(--line);border-radius:6px;pa
 .stab-bar i.slow{background:var(--warn)}
 .stab-bar i.bad{background:var(--bad)}
 .stab-stat{flex:0 0 220px;font-size:12px;color:var(--muted);text-align:right}
+/* ---------- 节点总表行内迷你时间块条（稳定性融合列） ---------- */
+.stab-cell{min-width:200px;cursor:default}
+.stab-bar.sm{min-width:120px}
+.stab-bar.sm i{height:9px}
+.stab-cell .muted{margin-top:2px}
 #toast{position:fixed;right:16px;bottom:16px;display:grid;gap:8px;z-index:99}
 #toast div{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--acc);padding:8px 14px;border-radius:6px;max-width:420px}
 #toast div.err{border-left-color:var(--bad)}
@@ -140,9 +145,16 @@ section h2{flex-wrap:wrap}
   </form>
 </section>
 
-<!-- ② 节点总表 -->
+<!-- ② 节点总表（融合纯净度报告与节点稳定性） -->
 <section id="sec-nodes">
-  <h2>节点总表 <span class="hint" id="node-count"></span></h2>
+  <h2>节点总表 <span class="hint" id="node-count"></span>
+    <span class="hint">纯净度 + 24h 稳定性逐节点融合；两路数据已自动驱动策略组，无需人工挑选</span>
+    <span style="flex:1"></span>
+    <label class="muted"><input type="checkbox" id="scan-full"> 全量扫描</label>
+    <button id="btn-scan">扫描纯净度</button>
+  </h2>
+  <div class="top3" id="purity-top3"></div>
+  <div class="stat" id="stab-summary">加载中…</div>
   <div class="filters">
     <select id="node-region"><option value="">全部地区</option></select>
     <select id="node-tag">
@@ -158,28 +170,7 @@ section h2{flex-wrap:wrap}
   <details id="node-anomalies" style="display:none"><summary>解析异常节点</summary><div id="node-anomalies-body"></div></details>
 </section>
 
-<!-- ③ 纯净度报告 -->
-<section id="sec-purity">
-  <h2>纯净度报告
-    <span class="hint">按 Claude 适配度排序；「家宽→机房」属性变化标红</span>
-    <span style="flex:1"></span>
-    <label class="muted"><input type="checkbox" id="scan-full"> 全量扫描</label>
-    <button id="btn-scan">扫描纯净度</button>
-  </h2>
-  <div class="top3" id="purity-top3"></div>
-  <div id="purity-table"></div>
-</section>
-
-<!-- ③b 节点稳定性 -->
-<section id="sec-stability">
-  <h2>节点稳定性
-    <span class="hint">每格 = 一轮定时采样（默认 15 分钟，窗口 24h）：绿=通畅 黄=通但慢 红=失败 灰=无数据，悬停看详情</span>
-  </h2>
-  <div class="stat" id="stab-summary">加载中…</div>
-  <div id="stab-rows"></div>
-</section>
-
-<!-- ④ 配置产物 -->
+<!-- ③ 配置产物 -->
 <section id="sec-config">
   <h2>配置产物 <span class="hint" id="config-summary"></span></h2>
   <div class="stat" id="offline-hint"></div>
@@ -352,7 +343,72 @@ $("#sub-add-form").addEventListener("submit", (ev) => {
   });
 });
 
-/* ---------- ② 节点总表 ---------- */
+/* ---------- ② 节点总表（融合纯净度 + 24h 稳定性） ---------- */
+const SLOW_MS = 500;        // 「通但慢」黄档阈值（ms），与健康采样口径一致
+const HEALTH = new Map();   // "sub␀name" → 24h 稳定性摘要（/api/health/history）
+const LOST = new Set();     // 「家宽→机房」属性变化的 (sub, name) 集合
+const nkey = (sub, name) => sub + "\u0000" + name;
+
+async function loadContexts(){
+  // 稳定性 + 纯净度两路上下文：节点总表渲染与策略说明共用；任一失败不拖垮另一路
+  const [hist, purity] = await Promise.allSettled([
+    api("/api/health/history?hours=24"),
+    api("/api/purity/report"),
+  ]);
+  HEALTH.clear();
+  if(hist.status === "fulfilled"){
+    for(const r of (hist.value.nodes || [])) HEALTH.set(nkey(r.source_sub, r.node_name), r);
+    const rows = hist.value.nodes || [];
+    if(rows.length){
+      const good = rows.filter(r => r.ok_rate >= .9).length;
+      const down = rows.filter(r => r.down_streak > 0).length;
+      $("#stab-summary").innerHTML =
+        `<span>稳定性窗口 24h（每格 = 一轮采样，绿=通畅 黄=通但慢 红=失败）</span>` +
+        `<span>采样节点 ${rows.length} 个</span><span>成功率≥90%：${good} 个</span>` +
+        `<span>当前连续失败：${down} 个</span>` +
+        (down ? '<span class="badge bad">判死节点已自动移出自动选路组、Claude 组沉底</span>' : "");
+    }else{
+      $("#stab-summary").textContent =
+        "暂无采样数据：每 15 分钟自动采样一轮，数个周期后即可看到趋势（探测实例需要 mihomo 可用）。";
+    }
+  }else{
+    $("#stab-summary").textContent = "稳定性数据加载失败：" + (hist.reason && hist.reason.message || hist.reason);
+  }
+  LOST.clear();
+  if(purity.status === "fulfilled"){
+    for(const c of (purity.value.changes || []))
+      if(c.is_residential_lost) LOST.add(nkey(c.source_sub, c.node_name));
+    const top = $("#purity-top3");
+    top.innerHTML = "";
+    (purity.value.recommendations || []).slice(0,3).forEach((r, i) => {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `<div class="rank">No.${i+1}</div>
+        <div class="name">${esc(r.node_name)}</div>
+        <div class="muted">${TYPE_ZH[r.ip_type] || "未知"}・${esc(r.exit_ip || "无出口 IP")}</div>
+        <div class="muted">${esc(r.asn || r.org || "")}</div>
+        <div class="muted">所属：${esc(r.source_sub)}・检测于 ${fmtTime(r.checked_at)}</div>`;
+      top.appendChild(card);
+    });
+    if(!(purity.value.recommendations||[]).length)
+      top.innerHTML = '<div class="muted">Claude 适配推荐：还没有检测数据，点右上「扫描纯净度」开始。</div>';
+  }
+}
+
+function stabSort(a, b){
+  // 组内「最优在前」：成功率降序 → 均延升序 → Claude 评分降序 → 名称
+  const ha = HEALTH.get(nkey(a.source_sub, a.name)), hb = HEALTH.get(nkey(b.source_sub, b.name));
+  const ra = ha ? ha.ok_rate : -1, rb = hb ? hb.ok_rate : -1;
+  if(ra !== rb) return rb - ra;
+  const da = ha && ha.avg_delay != null ? ha.avg_delay : Infinity;
+  const db = hb && hb.avg_delay != null ? hb.avg_delay : Infinity;
+  if(da !== db) return da - db;
+  const pa = a.purity && a.purity.claude_rank != null ? a.purity.claude_rank : -1;
+  const pb = b.purity && b.purity.claude_rank != null ? b.purity.claude_rank : -1;
+  if(pa !== pb) return pb - pa;
+  return String(a.name).localeCompare(String(b.name), "zh");
+}
+
 async function loadNodes(){
   const region = $("#node-region").value;
   const tag = $("#node-tag").value;
@@ -382,11 +438,12 @@ async function loadNodes(){
   box.innerHTML = "";
   for(const g of order){
     const list = groups[g];
+    list.sort(stabSort);   // 融合排序：稳定且干净的节点排每组最前
     const det = document.createElement("details");
     det.open = order.length <= 12;
     const rows = list.map(nodeRow).join("");
     det.innerHTML = `<summary>${regionZh(g || null)}（${list.length}）</summary>
-      <table><thead><tr><th>名称</th><th>属性</th><th>机场</th><th>纯净度</th></tr></thead><tbody>${rows}</tbody></table>`;
+      <table><thead><tr><th>名称</th><th>属性</th><th>稳定性 24h</th><th>纯净度</th><th>机场</th></tr></thead><tbody>${rows}</tbody></table>`;
     box.appendChild(det);
   }
   if(!real.length) box.innerHTML = '<div class="muted">（无节点）</div>';
@@ -400,25 +457,56 @@ async function loadNodes(){
     $("#node-filtered").style.display = "none";
   }
 }
+function stabCell(n){
+  const h = HEALTH.get(nkey(n.source_sub, n.name));
+  if(!h) return '<span class="muted">无采样</span>';
+  const cells = (h.samples || []).map(s => {
+    const cls = s.delay_ms == null ? "bad" : (s.delay_ms >= SLOW_MS ? "slow" : "ok");
+    const label = s.delay_ms == null ? "失败" : s.delay_ms + "ms";
+    return `<i class="${cls}" title="${esc(fmtTime(s.checked_at))} · ${label}"></i>`;
+  }).join("");
+  const stat = `成功率 ${(h.ok_rate*100).toFixed(0)}% ・ 均延 ${h.avg_delay == null ? "—" : h.avg_delay + "ms"}`
+    + (h.down_streak > 0 ? ` ・ <b style="color:var(--bad)">连续失败 ${h.down_streak}</b>` : "");
+  const title = `24h 采样 ${h.sample_count} 次 ・ 成功率 ${(h.ok_rate*100).toFixed(0)}%` +
+    ` ・ 均延 ${h.avg_delay == null ? "—" : h.avg_delay + "ms"} ・ 最后检测 ${fmtTime(h.last_checked_at)}` +
+    (h.down_streak > 0 ? " ・ 连续失败中：已从自动选路组剔除" : "");
+  return `<div class="stab-cell" title="${esc(title)}"><div class="stab-bar sm">${cells}</div><div class="muted">${stat}</div></div>`;
+}
+function purityCell(n){
+  if(!n.purity) return '<span class="muted">未测</span>';
+  const p = n.purity;
+  const stars = p.claude_rank === 3 ? "★★★" : p.claude_rank === 2 ? "★★" : p.claude_rank === 1 ? "★" : p.claude_rank === 0 ? "⚠ 代理" : "";
+  const bits = [p.exit_ip, p.asn, p.org, TYPE_ZH[p.ip_type] || "",
+    p.checked_at ? "检测于 " + fmtTime(p.checked_at) : ""].filter(Boolean);
+  let html = `<span class="${TYPE_CLS[p.ip_type] || "badge"}" title="${esc(bits.join("・"))}">${stars || TYPE_ZH[p.ip_type] || "未测"}</span>`;
+  if(p.proxy) html += ' <span class="badge bad" title="出口被标记为代理/数据中心段">已标记代理</span>';
+  if(LOST.has(nkey(n.source_sub, n.name)))
+    html += ' <span class="badge bad" title="上次检测为家宽、本次变为机房，建议重锁 Claude 节点">家宽→机房</span>';
+  return html;
+}
 function nodeRow(n){
   const badges = [];
   if(n.residential) badges.push('<span class="badge b-res">家宽</span>');
   if(n.iplc) badges.push('<span class="badge b-iplc">专线</span>');
   if(n.rate > 1) badges.push(`<span class="badge b-rate">x${n.rate}</span>`);
-  let purity = '<span class="muted">未测</span>';
-  if(n.purity){
-    const p = n.purity;
-    const stars = p.claude_rank === 3 ? "★★★" : p.claude_rank === 2 ? "★★" : p.claude_rank === 1 ? "★" : p.claude_rank === 0 ? "⚠ 代理" : "";
-    const title = [p.exit_ip, p.asn, TYPE_ZH[p.ip_type] || ""].filter(Boolean).join("・");
-    purity = `<span class="${TYPE_CLS[p.ip_type] || "badge"}" title="${esc(title)}">${stars || TYPE_ZH[p.ip_type] || "未测"}</span>`;
-  }
   const name = n.orig_name ? `${esc(n.name)} <span class="muted">（原名 ${esc(n.orig_name)}）</span>` : esc(n.name);
   const reason = n.filtered && n.filter_reason ? ` <span class="badge bad">命中：${esc(n.filter_reason)}</span>` : "";
-  return `<tr><td class="t">${name}${reason}</td><td data-l="属性">${badges.join(" ") || '<span class="muted">—</span>'}</td><td class="muted" data-l="机场">${esc(n.source_sub)}</td><td data-l="纯净度">${purity}</td></tr>`;
+  return `<tr><td class="t">${name}${reason}</td><td data-l="属性">${badges.join(" ") || '<span class="muted">—</span>'}</td><td data-l="稳定性 24h">${stabCell(n)}</td><td data-l="纯净度">${purityCell(n)}</td><td class="muted" data-l="机场">${esc(n.source_sub)}</td></tr>`;
 }
 for(const [id, ev] of [["#node-region","change"],["#node-tag","change"],["#node-sub","change"]]){
   $(id).addEventListener(ev, () => guard(null, loadNodes).catch(() => {}));
 }
+
+$("#btn-scan").addEventListener("click", (ev) => {
+  const full = $("#scan-full").checked;
+  guard(ev.target, async () => {
+    const r = await api("/api/purity/scan", {method:"POST", body:{full}});
+    if(r.unavailable) toast("探测实例不可用，本轮扫描未完成（下轮自动重试）", true);
+    else toast(`纯净度扫描完成：检测 ${r.checked} 个，跳过 ${r.skipped} 个${full ? "（全量）" : ""}`);
+    await loadContexts();
+    await loadNodes();
+  });
+});
 
 /* ---------- 解析异常节点（docs/01 安全网：解析失败被跳过的条目可见） ---------- */
 async function loadAnomalies(){
@@ -438,82 +526,6 @@ async function loadAnomalies(){
     `<table><thead><tr><th>节点 / 标识</th><th>来源格式</th><th>原因</th><th>机场</th><th>时间</th></tr></thead><tbody>${rows}</tbody></table>`;
   box.querySelector("summary").textContent = `解析异常节点（${items.length}，已跳过不入库）`;
 }
-
-/* ---------- ③ 纯净度报告 ---------- */
-async function loadPurity(){
-  const data = await api("/api/purity/report");
-  const top = $("#purity-top3");
-  top.innerHTML = "";
-  (data.recommendations || []).slice(0,3).forEach((r, i) => {
-    const card = document.createElement("div");
-    card.className = "card";
-    card.innerHTML = `<div class="rank">No.${i+1}</div>
-      <div class="name">${esc(r.node_name)}</div>
-      <div class="muted">${TYPE_ZH[r.ip_type] || "未知"}・${esc(r.exit_ip || "无出口 IP")}</div>
-      <div class="muted">${esc(r.asn || r.org || "")}</div>
-      <div class="muted">所属：${esc(r.source_sub)}・检测于 ${fmtTime(r.checked_at)}</div>`;
-    top.appendChild(card);
-  });
-  if(!(data.recommendations||[]).length) top.innerHTML = '<div class="muted">还没有检测数据，点「扫描纯净度」开始。</div>';
-
-  const rows = (data.results || []).map(r => {
-    const lost = r.residential_lost;
-    const t = TYPE_ZH[r.ip_type] || "未知";
-    return `<tr class="${lost ? "row-alert" : ""}">
-      <td class="t">${esc(r.node_name)}${lost ? ' <span class="badge bad">家宽→机房，建议重锁 Claude 节点</span>' : ""}</td>
-      <td data-l="地区">${regionZh(r.node && r.node.region)}</td>
-      <td data-l="出口 IP">${esc(r.exit_ip || "—")}</td>
-      <td data-l="ASN / 组织">${esc(r.asn || r.org || "—")}</td>
-      <td data-l="类型"><span class="${TYPE_CLS[r.ip_type] || "badge"}">${t}</span>${r.proxy ? ' <span class="badge bad">已标记代理</span>' : ""}</td>
-      <td class="muted" data-l="检测时间">${fmtTime(r.checked_at)}</td></tr>`;
-  }).join("");
-  $("#purity-table").innerHTML = rows
-    ? `<table><thead><tr><th>节点</th><th>地区</th><th>出口 IP</th><th>ASN / 组织</th><th>类型</th><th>检测时间</th></tr></thead><tbody>${rows}</tbody></table>`
-    : '<div class="muted">暂无检测结果。</div>';
-}
-$("#btn-scan").addEventListener("click", (ev) => {
-  const full = $("#scan-full").checked;
-  guard(ev.target, async () => {
-    const r = await api("/api/purity/scan", {method:"POST", body:{full}});
-    if(r.unavailable) toast("探测实例不可用，本轮扫描未完成（下轮自动重试）", true);
-    else toast(`纯净度扫描完成：检测 ${r.checked} 个，跳过 ${r.skipped} 个${full ? "（全量）" : ""}`);
-    await loadPurity();
-  });
-});
-
-/* ---------- ③b 节点稳定性：健康时间块条 ---------- */
-const SLOW_MS = 500;   // 「通但慢」黄档阈值（ms）
-async function loadStability(){
-  const box = $("#stab-rows"), sum = $("#stab-summary");
-  try{
-    const data = await api("/api/health/history?hours=24");
-    const rows = data.nodes || [];
-    if(!rows.length){
-      box.innerHTML = "";
-      sum.innerHTML = "暂无采样数据。每 15 分钟自动采样一轮，数个周期后即可看到趋势（探测实例需要 mihomo 可用）.";
-      return;
-    }
-    const good = rows.filter(r => r.ok_rate >= .9).length;
-    const down = rows.filter(r => r.down_streak > 0).length;
-    sum.textContent = `窗口 24h ・ 采样节点 ${rows.length} 个 ・ 成功率≥90%：${good} 个 ・ 当前连续失败：${down} 个`;
-    box.innerHTML = rows.map(r => {
-      const cells = (r.samples || []).map(s => {
-        const cls = s.delay_ms == null ? "bad" : (s.delay_ms >= SLOW_MS ? "slow" : "ok");
-        const label = s.delay_ms == null ? "失败" : s.delay_ms + "ms";
-        return `<i class="${cls}" title="${esc(fmtTime(s.checked_at))} · ${label}"></i>`;
-      }).join("");
-      const stat = `成功率 ${(r.ok_rate*100).toFixed(0)}% ・ 均延 ${r.avg_delay == null ? "—" : r.avg_delay + "ms"}`
-        + (r.down_streak > 0 ? ` ・ <b style="color:var(--bad)">连续失败 ${r.down_streak}</b>` : "");
-      return `<div class="stab-row">
-        <div class="stab-name" title="${esc(r.node_name)}（${esc(r.source_sub)}）">${esc(r.node_name)}</div>
-        <div class="stab-bar">${cells}</div>
-        <div class="stab-stat">${stat}</div></div>`;
-    }).join("");
-  }catch(err){
-    sum.textContent = "加载失败：" + err;
-  }
-}
-setInterval(() => loadStability().catch(() => {}), 5 * 60 * 1000);
 
 /* ---------- ④ 配置产物 ---------- */
 let currentFmt = "clash";
@@ -654,9 +666,13 @@ $("#mirror-form").addEventListener("submit", (ev) => {
 $("#btn-reload").addEventListener("click", () => guard($("#btn-reload"), reload));
 
 async function reload(){
-  await Promise.allSettled([loadSubs(), loadNodes(), loadAnomalies(), loadPurity(), loadStability(), loadConfig(), loadOps(), loadMirror()]);
+  // 先拉稳定性 + 纯净度上下文（节点总表融合渲染依赖），再并行刷新其余板块
+  await loadContexts().catch(() => {});
+  await Promise.allSettled([loadSubs(), loadNodes(), loadAnomalies(), loadConfig(), loadOps(), loadMirror()]);
 }
 reload();
+// 稳定性/纯净度上下文轻量自刷：只重拉两路数据并重渲节点总表
+setInterval(() => loadContexts().then(loadNodes).catch(() => {}), 5 * 60 * 1000);
 </script>
 </body>
 </html>

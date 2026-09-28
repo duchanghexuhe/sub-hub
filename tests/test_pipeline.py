@@ -61,8 +61,9 @@ class Harness:
         self.publish_errors: list[str] | None = None
         # templater 可编程故障
         self.render_garbage = False
-        # 每次 render 收到的 purity 参数（对齐真实 templater 契约的回灌断言）
+        # 每次 render 收到的 purity / stability 参数（对齐真实 templater 契约的回灌断言）
         self.render_purity: list = []
+        self.render_stability: list = []
         # mirror 记录
         self.mirror_enabled = True
         self.mirror_attempts = 0
@@ -179,8 +180,9 @@ class Harness:
             names = [n.name for n in nodes]
             return [{"name": "🚀 节点选择", "type": "select", "proxies": names}]
 
-        def render_clash(nodes, *, config, rules, offline=False, purity=None):
+        def render_clash(nodes, *, config, rules, offline=False, purity=None, stability=None):
             harness.render_purity.append(list(purity or []))
+            harness.render_stability.append(list(stability or []))
             if harness.render_garbage:
                 return "proxies: [未闭合"   # 必然触发 YAML 解析错误
             doc = {
@@ -191,7 +193,7 @@ class Harness:
             }
             return yaml.safe_dump(doc, allow_unicode=True, sort_keys=False)
 
-        def render_sr_conf(nodes, *, config, rules, offline=False, purity=None):
+        def render_sr_conf(nodes, *, config, rules, offline=False, purity=None, stability=None):
             if harness.render_garbage:
                 return "垃圾内容，无段落结构"
             names = [n.name for n in nodes] or ["DIRECT"]
@@ -673,6 +675,31 @@ def test_render_receives_latest_purity(harness: Harness, config: AppConfig, stor
         assert len(purity) == 1
         assert purity[0].node_name == "🇺🇸 美国 洛杉矶 家庭宽带 01"
         assert purity[0].claude_rank == 3
+
+
+def test_render_receives_stability_summary(harness: Harness, config: AppConfig, store: Store,
+                                           sub_a_path: Path) -> None:
+    """渲染回灌 24h 稳定性摘要（判死节点标记 hard_down，供 templater 剔除/沉底）。"""
+    from datetime import datetime, timedelta
+
+    from app.models import HealthSample
+
+    _add_sub(store, "a")
+    harness.set_sub("a", sub_a_path)
+    at = (datetime.now() - timedelta(minutes=15)).isoformat()
+    store.save_health_samples([
+        HealthSample(node_name="🇺🇸 美国 洛杉矶 家庭宽带 01", source_sub="a",
+                     checked_at=at, delay_ms=None),   # delay=None = 本轮失败
+    ])
+
+    assert pipeline.run_full_pipeline(config, store).published is True
+
+    assert len(harness.render_stability) == 2        # 与 render_purity 同口径（主+离线两次）
+    for rows in harness.render_stability:
+        assert len(rows) == 1
+        assert rows[0]["node_name"] == "🇺🇸 美国 洛杉矶 家庭宽带 01"
+        assert rows[0]["down_streak"] == 1           # 仅 1 轮失败：未达判死线但已可见
+        assert rows[0]["hard_down"] is False
 
 
 def test_single_sub_refresh_keeps_disambiguation(harness: Harness, config: AppConfig,

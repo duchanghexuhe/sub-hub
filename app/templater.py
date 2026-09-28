@@ -10,6 +10,10 @@ docs/02 §2~§5 的实现：
 公开签名以 docs/INTERFACES.md §3.4 为准；另按模块要求补充：
 - build_groups/render_* 增加可选关键字参数 purity（纯净度结果列表，可为空），
   用于 Claude 专用组「评分降序、住宅恒在机房前」的排序；
+- build_groups/render_* 增加可选关键字参数 stability（health.stability_index
+  的摘要 dict 列表，可为空）：窗口内连续失败判死的节点从 url-test 自动选路组
+  剔除（组空回退原成员），Claude 组同评分内存活优先、判死沉底——
+  采样数据自动驱动策略，无需人工挑选；
 - render_all() 便捷入口：一次产出四份产物文本与统计（组数/节点数/SR 跳过 anytls 数）。
 
 安全纪律：日志只输出计数、组名与节点名，绝不打印订阅 URL 与节点凭据字段。
@@ -264,6 +268,45 @@ def _purity_map(purity: list[PurityResult] | None) -> dict[tuple[str, str], Puri
     return {(p.source_sub, p.node_name): p for p in purity or []}
 
 
+def _stability_map(stability: list[dict] | None) -> dict[tuple[str, str], dict]:
+    """稳定性摘要按 (source_sub, node_name) 索引（health.stability_index 产出）。"""
+    return {(s["source_sub"], s["node_name"]): s for s in stability or []}
+
+
+_BIG_DELAY = 1 << 30
+
+
+def _stability_sort_key(stat: dict | None) -> tuple:
+    """同评分层内的稳定性次序：存活有数据 → 无数据 → 判死沉底。
+
+    有数据存活段内按 成功率降序 → 均延迟升序 → 连续失败升序；
+    无数据不等同于死节点，排在该层末尾但不沉到判死之后（实测数据优先，
+    缺数据只降位不清退）。
+    """
+    if stat is None:
+        return (1, 0.0, 0, 0)
+    avg = stat.get("avg_delay")
+    return (
+        2 if stat.get("hard_down") else 0,
+        -float(stat.get("ok_rate") or 0.0),
+        int(avg) if avg is not None else _BIG_DELAY,
+        int(stat.get("down_streak") or 0),
+    )
+
+
+def _alive(nodes: list[Node], smap: dict[tuple[str, str], dict]) -> list[Node]:
+    """剔除窗口内连续失败判死（hard_down）的节点；健康数据缺失时原样返回。
+
+    只用于 url-test 自动选路组的成员收敛——mihomo 自身会持续测活并避开
+    死节点，这里剔除的是「发布时刻已判死」的成员，让初选不踩坑、客户端
+    不浪费探测；组清空时由调用方回退原成员清单（mihomo 拒载空组）。
+    """
+    return [
+        n for n in nodes
+        if not (smap.get((n.source_sub, n.name)) or {}).get("hard_down")
+    ]
+
+
 def _static_claude_tier(node: Node) -> int:
     """docs/02 §2 静态排序分层：美国家宽 0 → 其他美国 1 → 港/新家宽 2 → 其余 3。"""
     if node.region == "US":
@@ -274,14 +317,19 @@ def _static_claude_tier(node: Node) -> int:
 
 
 def order_claude_candidates(nodes: list[Node],
-                            purity: list[PurityResult] | None = None) -> list[Node]:
+                            purity: list[PurityResult] | None = None,
+                            stability: list[dict] | None = None) -> list[Node]:
     """Claude 专用/备援候选池排序（防封号核心，docs/02 §2）。
 
     - 无检测数据：静态排序「美国家宽 → 其他美国 → 香港/新加坡家宽 → 其余」；
     - 有评分：按 claude_rank 降序，住宅恒在机房之前；未评分节点排在已评分之后，
-      其内部仍按静态序（实测数据优先于节点名猜测，docs/04 验收 #7）。
+      其内部仍按静态序（实测数据优先于节点名猜测，docs/04 验收 #7）；
+    - 稳定性（health.stability_index，可为空）是同评分层内的次级排序：
+      存活优先 → 成功率降序 → 均延迟升序；窗口内连续失败判死的节点沉到该层
+      最末——专用组是 select、首位即默认选中，绝不让默认落在挂掉的节点上。
     """
     pmap = _purity_map(purity)
+    smap = _stability_map(stability)
 
     def sort_key(node: Node) -> tuple:
         # 查询键用消歧后最终名（与 _purity_map 的键语义一致，见其 docstring）
@@ -289,7 +337,9 @@ def order_claude_candidates(nodes: list[Node],
         tier = _static_claude_tier(node)
         if result is not None and result.claude_rank is not None:
             residential_after = 0 if result.ip_type == "residential" else 1
-            return (0, -int(result.claude_rank), residential_after, tier, node.name)
+            stability_key = _stability_sort_key(smap.get((node.source_sub, node.name)))
+            return (0, -int(result.claude_rank), residential_after,
+                    *stability_key, tier, node.name)
         return (1, tier, node.name)
 
     return sorted(nodes, key=sort_key)
@@ -300,6 +350,8 @@ def _claude_pool(real: list[Node], purity: list[PurityResult] | None) -> list[No
 
     未检测（无结果/未评分）节点一律不得入组——劣质节点不如不用；全库无合格
     节点（未扫描/探测不可用）时回退全量真实节点池，mihomo 拒载空组是硬约束。
+    准入只看纯净度、不看稳定性：若全库合格节点恰好都判死，剔除会让池落空
+    触发全量兜底（更糟）；判死节点由排序沉底 + mihomo 备援组自身测活兜住。
     """
     pmap = _purity_map(purity)
     admitted = [
@@ -314,6 +366,7 @@ def _claude_pool(real: list[Node], purity: list[PurityResult] | None) -> list[No
 
 def build_groups(nodes: list[Node], *, config: AppConfig,
                  purity: list[PurityResult] | None = None,
+                 stability: list[dict] | None = None,
                  region_presence_nodes: list[Node] | None = None) -> list[dict]:
     """按 docs/02 §2 计算全部 proxy-groups，返回 mihomo 原生 dict 结构。
 
@@ -325,10 +378,14 @@ def build_groups(nodes: list[Node], *, config: AppConfig,
     - ♻️ 常规自动只收低倍率：成员为倍率 ≤ max(config.auto_max_rate, 全库最低倍率)
       的节点（省流：常规流量不走高价档；全库无达标倍率时阈值自动放宽到最低档）；
     - purity：纯净度结果（可为空）。有数据时 Claude 专用/备援只收 claude_rank ≥
-      CLAUDE_MIN_RANK 的节点，无合格数据时全量池兜底（组不可为空）。
+      CLAUDE_MIN_RANK 的节点，无合格数据时全量池兜底（组不可为空）；
+    - stability：稳定性摘要（health.stability_index，可为空）。窗口内连续失败
+      判死的节点从 url-test 自动选路组剔除（清空时回退原成员，组不空置），
+      Claude 组同评分内存活优先、判死沉底；无数据时行为与不传一致。
     """
     real = _real_nodes(nodes)
     presence = _real_nodes(region_presence_nodes) if region_presence_nodes is not None else real
+    smap = _stability_map(stability)
 
     by_region: dict[str | None, list[Node]] = {}
     for n in real:
@@ -337,12 +394,13 @@ def build_groups(nodes: list[Node], *, config: AppConfig,
     region_names = [region_group_name(c) for c in present_codes]
 
     all_names = [n.name for n in real]
-    us_names = [n.name for n in real if n.region == "US"] or [G_AUTO]
+    us_names = [n.name for n in _alive([n for n in real if n.region == "US"], smap)] or [G_AUTO]
     claude_members = [n.name for n in
-                      order_claude_candidates(_claude_pool(real, purity), purity)]
+                      order_claude_candidates(_claude_pool(real, purity), purity, stability)]
+    alive_names = [n.name for n in _alive(real, smap)] or list(all_names)
 
     groups: list[dict] = []
-    # 1. 🚀 节点选择：常规自动 → 各地区组 → DIRECT → 全部节点
+    # 1. 🚀 节点选择：常规自动 → 各地区组 → DIRECT → 全部节点（手动列表保留全量）
     groups.append({
         "name": G_MAIN, "type": "select",
         "proxies": [G_AUTO, *region_names, "DIRECT", *all_names],
@@ -350,13 +408,15 @@ def build_groups(nodes: list[Node], *, config: AppConfig,
     # 2. ♻️ 常规自动：低倍率节点（倍率 ≤ max(阈值, 全库最低倍率)；空池兜底全量）
     if real:
         cutoff = max(config.auto_max_rate, min(n.rate for n in real))
-        auto_names = [n.name for n in real if n.rate <= cutoff]
+        auto_pool = [n for n in real if n.rate <= cutoff] or real
+        auto_pool = _alive(auto_pool, smap) or auto_pool
+        auto_names = [n.name for n in auto_pool]
     else:
         auto_names = []
     groups.append(_url_test_group(G_AUTO, auto_names or list(all_names)))
-    # 3. 地区组（按需生成；url-test）
+    # 3. 地区组（按需生成；url-test；判死节点剔除，清空回退常规自动）
     for code in present_codes:
-        members = [n.name for n in by_region.get(code, [])] or [G_AUTO]
+        members = [n.name for n in _alive(by_region.get(code, []), smap)] or [G_AUTO]
         groups.append(_url_test_group(region_group_name(code), members,
                                       filter_regex=_region_filter(code)))
     # 4. ⛳ 美国优质（含家宽+机房）
@@ -380,7 +440,7 @@ def build_groups(nodes: list[Node], *, config: AppConfig,
         "proxies": [G_CLAUDE, G_US, G_OPENAI, *region_names],
     })
     # 9. 📲 Telegram（全部节点，追求延迟）
-    groups.append(_url_test_group(G_TG, all_names))
+    groups.append(_url_test_group(G_TG, alive_names))
     # 10. 流媒体四个 select（成员=各地区组，保持手动）
     for name in (G_NETFLIX, G_DISNEY, G_YOUTUBE, G_SPOTIFY):
         groups.append({"name": name, "type": "select", "proxies": list(region_names)})
@@ -627,10 +687,11 @@ def _sr_group_line(group: dict[str, Any]) -> str:
 # ---------------------------------------------------------------- 渲染入口
 
 def render_clash(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
-                 offline: bool = False, purity: list[PurityResult] | None = None) -> str:
+                 offline: bool = False, purity: list[PurityResult] | None = None,
+                 stability: list[dict] | None = None) -> str:
     """渲染 mihomo（Clash Verge）YAML。offline=True 时规则内联（离线自包含版）。"""
     real = _real_nodes(nodes)
-    groups = build_groups(real, config=config, purity=purity)
+    groups = build_groups(real, config=config, purity=purity, stability=stability)
     proxies = [n.to_clash_proxy() for n in real]
     providers = _build_rule_providers(rules, config, offline=offline)
     template = _env.get_template("clash.yaml.j2")
@@ -648,7 +709,8 @@ def render_clash(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry]
 
 
 def render_sr_conf(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
-                   offline: bool = False, purity: list[PurityResult] | None = None) -> str:
+                   offline: bool = False, purity: list[PurityResult] | None = None,
+                   stability: list[dict] | None = None) -> str:
     """渲染 Shadowrocket conf。offline=True 时 .list 内容展开进 [Rule]。
 
     组与 mihomo 同名同语义：分组结构按全量节点判定（region_presence_nodes），
@@ -656,7 +718,7 @@ def render_sr_conf(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntr
     """
     real = _real_nodes(nodes)
     sr_nodes, skipped_anytls, _ = _prepare_sr_nodes(real, config)
-    groups = build_groups(sr_nodes, config=config, purity=purity,
+    groups = build_groups(sr_nodes, config=config, purity=purity, stability=stability,
                           region_presence_nodes=real)
     proxy_lines = [line for line in (_sr_proxy_line(n) for n in sr_nodes) if line]
     template = _env.get_template("sr.conf.j2")
@@ -674,11 +736,12 @@ def render_sr_conf(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntr
 
 
 def render_all(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
-               purity: list[PurityResult] | None = None) -> RenderResult:
+               purity: list[PurityResult] | None = None,
+               stability: list[dict] | None = None) -> RenderResult:
     """一次渲染四份产物 + 统计（pipeline 推荐入口）。"""
     real = _real_nodes(nodes)
     sr_nodes, skipped_anytls, skipped_other = _prepare_sr_nodes(real, config)
-    groups = build_groups(real, config=config, purity=purity)
+    groups = build_groups(real, config=config, purity=purity, stability=stability)
     region_names = [region_group_name(c)
                     for c in _ordered_present_regions({n.region for n in real})]
     stats = RenderStats(
@@ -691,9 +754,13 @@ def render_all(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
     logger.info("渲染完成：节点 %d 个，分组 %d 个，SR 跳过 anytls %d 个",
                 stats.node_count, stats.group_count, stats.sr_skipped_anytls)
     return RenderResult(
-        clash_yaml=render_clash(real, config=config, rules=rules, offline=False, purity=purity),
-        sr_conf=render_sr_conf(real, config=config, rules=rules, offline=False, purity=purity),
-        clash_offline_yaml=render_clash(real, config=config, rules=rules, offline=True, purity=purity),
-        sr_offline_conf=render_sr_conf(real, config=config, rules=rules, offline=True, purity=purity),
+        clash_yaml=render_clash(real, config=config, rules=rules, offline=False,
+                                purity=purity, stability=stability),
+        sr_conf=render_sr_conf(real, config=config, rules=rules, offline=False,
+                               purity=purity, stability=stability),
+        clash_offline_yaml=render_clash(real, config=config, rules=rules, offline=True,
+                                        purity=purity, stability=stability),
+        sr_offline_conf=render_sr_conf(real, config=config, rules=rules, offline=True,
+                                       purity=purity, stability=stability),
         stats=stats,
     )

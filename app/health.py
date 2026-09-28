@@ -7,7 +7,10 @@ unavailable，不影响分发主链路。
 单点延迟只代表采样瞬间，本模块的价值在**时间序列**：每轮对全部真实节点
 delay 探测一次（经控制 API 直测节点，不切换 PROBE 出口），一行一个
 HealthSample；history_report 按 24h 窗口聚合出成功率/均延迟/连续失败，
-UI 渲染为逐采样时间块条（绿=通畅 黄=通但慢 红=失败 灰=无数据）。
+UI 渲染为逐采样时间块条（绿=通畅 黄=通但慢 红=失败 灰=无数据）；
+stability_index 把同一聚合投影成紧凑索引，供 templater 渲染时融合进
+策略组（判死节点剔除/沉底、同评分存活优先）——采样数据自动驱动策略，
+无需人工挑选。
 
 保留策略：样本默认保留 7 天（远大于展示窗口），每轮采样后清理过期行。
 安全纪律：只记录节点名/订阅名/时延，无凭据字段；日志不输出订阅 URL。
@@ -31,6 +34,14 @@ RETENTION_DAYS = 7
 
 SLOW_DELAY_MS = 500
 """「通但慢」分界：块条黄色档阈值（mgmt UI 与 docs/02 测速口径一致）。"""
+
+HARD_DOWN_STREAK = 3
+"""「连续失败判死」阈值：窗口末尾连续失败达到该轮数（默认采样 15 分钟/轮 ≈ 45 分钟
+不可达）即视为硬死，渲染层从自动选路组剔除、Claude 组排序沉底
+（与 templater 给 url-test/fallback 组下的 max-failed-times=3 客户端判死口径一致）。"""
+
+STABILITY_WINDOW_HOURS = 24
+"""策略融合与 UI 时间块条共用的稳定性统计窗口（小时）。"""
 
 
 @dataclass(frozen=True)
@@ -93,6 +104,28 @@ def sample_once(nodes: list[Node], *, config: AppConfig, store: Store) -> Health
     logger.info("健康采样完成：%d/%d 可达（轮时刻 %s），清理过期样本 %d 行",
                 ok_count, len(samples), at, max(pruned, 0))
     return HealthReport(checked=len(samples), ok_count=ok_count, unavailable=unavailable)
+
+
+def stability_index(store: Store, *, window_hours: int = STABILITY_WINDOW_HOURS) -> dict:
+    """(source_sub, node_name) → 窗口内稳定性摘要 dict，渲染层策略融合的输入。
+
+    history_report 的投影（不含逐样本块序列，供 templater 排序/剔除消费）：
+    sample_count / ok_rate / avg_delay / down_streak / hard_down。
+    窗口内无样本的节点不出现在索引里——渲染层据此原样保留其现有位置
+    （无数据 ≠ 死节点，绝不因缺采样而改变行为）。
+    """
+    index: dict[tuple[str, str], dict] = {}
+    for row in history_report(store, window_hours=window_hours)["nodes"]:
+        index[(row["source_sub"], row["node_name"])] = {
+            "node_name": row["node_name"],
+            "source_sub": row["source_sub"],
+            "sample_count": row["sample_count"],
+            "ok_rate": row["ok_rate"],
+            "avg_delay": row["avg_delay"],
+            "down_streak": row["down_streak"],
+            "hard_down": row["down_streak"] >= HARD_DOWN_STREAK,
+        }
+    return index
 
 
 def history_report(store: Store, *, window_hours: int = 24) -> dict:

@@ -248,18 +248,26 @@ class RuleEntry:                       # rules_manifest.yaml 单项的内存形�
 def load_rules_manifest(path: Path | None = None) -> list[RuleEntry]
     # 默认读仓库根 rules_manifest.yaml，按文件顺序返回
 
-def build_groups(nodes: list[Node], *, config: AppConfig) -> list[dict]
+def build_groups(nodes: list[Node], *, config: AppConfig,
+                 purity: list[PurityResult] | None = None,
+                 stability: list[dict] | None = None,
+                 region_presence_nodes: list[Node] | None = None) -> list[dict]
     # docs/02 §2 组清单：无节点的地区组不生成；返回 mihomo proxy-groups 原生 dict 结构
     # 测速参数统一：url=http://cp.cloudflare.com/generate_204, interval=120, tolerance=40,
     # max-failed-times=3, timeout=3000；🧷 Claude 备援 interval=90 且 lazy=false
+    # purity：Claude 专用/备援准入（claude_rank≥3）与「评分降序、住宅恒在机房前」排序
+    # stability：health.stability_index 摘要 dict 列表——判死节点从 url-test 组剔除
+    # （组清空回退原成员）、Claude 组同评分内存活优先/判死沉底；无数据时行为不变
 
 def render_clash(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
-                 offline: bool = False) -> str
+                 offline: bool = False, purity: list[PurityResult] | None = None,
+                 stability: list[dict] | None = None) -> str
     # 主版本 rule-providers 指 http://<nas>:8399/rules/<clash_file>；offline=True 时
     # type: inline + payload 内联（data/rules/ 现有内容）。全局段按 docs/02 §4。
 
 def render_sr_conf(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
-                   offline: bool = False) -> str
+                   offline: bool = False, purity: list[PurityResult] | None = None,
+                   stability: list[dict] | None = None) -> str
     # [Proxy] [Proxy Group] [Rule] 三段；组与 mihomo 同名同语义；
     # config.skip_anytls=True 时跳过 anytls 节点（参数默认开）。
     # offline=True 时 .list 内容直接展开进 [Rule]。
@@ -432,10 +440,11 @@ if __name__ == "__main__":
 ```python
 def create_scheduler(config: AppConfig, store: Store) -> BackgroundScheduler
     # APScheduler BackgroundScheduler（fetcher/pipeline/rulesync 均为同步函数）
-    # 三个 job（id 固定，供 /api/health 读取）：
+    # 四个 job（id 固定，供 /api/health 读取）：
     #   sub_refresh  interval minutes=config.sub_refresh_minutes → pipeline.run_full_pipeline(config, store)
     #   rules_mirror interval hours=config.rules_mirror_hours   → rulesync.sync_rules(config)
     #   purity_scan  cron hour=config.purity_scan_hour, minute=0 → purity.scan(全量)
+    #   health_probe interval minutes=config.health_probe_minutes（0=不注册）→ health.sample_once
     # 每个 job 执行完把 {job_id: {last_run, last_status, last_error}} 合并写入
     # config.scheduler_state_path（utils.write_json）；错误不外抛
 ```
