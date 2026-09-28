@@ -4,6 +4,7 @@
 - sub_refresh   每 sub_refresh_minutes 分钟 → pipeline.run_full_pipeline（订阅刷新全链路）
 - rules_mirror  每 rules_mirror_hours 小时  → rulesync.sync_rules（上游规则缓存镜像）
 - purity_scan   每天 purity_scan_hour:00    → purity.scan 全量（出口 IP 纯净度）
+- health_probe  每 health_probe_minutes 分钟 → health.sample_once（延迟/可达性采样，0=关闭）
 
 执行状态：每个任务最近执行时间/状态/摘要同时写入内存与
 data/scheduler_state.json（/api/health 读文件，二者内容一致）。
@@ -31,7 +32,9 @@ logger = logging.getLogger("subhub.scheduler")
 JOB_SUB_REFRESH = "sub_refresh"
 JOB_RULES_MIRROR = "rules_mirror"
 JOB_PURITY_SCAN = "purity_scan"
-JOB_IDS: tuple[str, ...] = (JOB_SUB_REFRESH, JOB_RULES_MIRROR, JOB_PURITY_SCAN)
+JOB_HEALTH_PROBE = "health_probe"
+JOB_IDS: tuple[str, ...] = (JOB_SUB_REFRESH, JOB_RULES_MIRROR, JOB_PURITY_SCAN,
+                            JOB_HEALTH_PROBE)
 
 _STATE_LABELS = {"ok": "成功", "error": "失败"}
 
@@ -71,6 +74,19 @@ def _job_purity_scan(config: AppConfig, store: Store) -> str:
     return summary
 
 
+def _job_health_probe(config: AppConfig, store: Store) -> str:
+    from app.health import sample_once
+
+    nodes = store.list_nodes(filtered=False)
+    report = sample_once(nodes, config=config, store=store)
+    if report.unavailable and not report.checked:
+        return "探测实例不可用，本轮健康采样放弃（主链路无感）"
+    summary = f"采样 {report.checked} 个，可达 {report.ok_count} 个（{report.ok_rate:.0%}）"
+    if report.unavailable:
+        summary += "（探测实例中途失效，尾部节点本轮无样本）"
+    return summary
+
+
 # ------------------------------------------------------------------ 状态记录
 
 def _merge_state(config: AppConfig, job_id: str, entry: dict[str, Any]) -> None:
@@ -89,7 +105,7 @@ def _merge_state(config: AppConfig, job_id: str, entry: dict[str, Any]) -> None:
 
 
 def read_scheduler_state(config: AppConfig) -> dict[str, dict[str, Any]]:
-    """读取三任务最近执行状态（状态文件为主、内存兜底；/api/health 用）。"""
+    """读取四任务最近执行状态（状态文件为主、内存兜底；/api/health 用）。"""
     path = str(config.scheduler_state_path)
     with _STATE_LOCK:
         file_state = read_json(config.scheduler_state_path, default={})
@@ -143,6 +159,7 @@ def create_scheduler(config: AppConfig, store: Store) -> BackgroundScheduler:
     三个 job 的 id 固定为 JOB_IDS；触发器参数全部来自 config。附加属性：
     - scheduler.subhub_jobs：{job_id: 包装器}，便于手动触发与测试；
     - scheduler.subhub_state_path：状态文件路径，便于 web 关联展示。
+    health_probe 在 SUBHUB_HEALTH_MINUTES ≤ 0 时不注册（关闭采样）。
     """
     scheduler = BackgroundScheduler(
         job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 300},
@@ -164,6 +181,12 @@ def create_scheduler(config: AppConfig, store: Store) -> BackgroundScheduler:
             lambda: _job_purity_scan(config, store),
         ),
     }
+    if config.health_probe_minutes > 0:
+        bodies[JOB_HEALTH_PROBE] = (
+            "interval",
+            {"minutes": config.health_probe_minutes},
+            lambda: _job_health_probe(config, store),
+        )
     wrappers: dict[str, Callable[[], dict[str, Any]]] = {}
     for job_id, (trigger, trigger_kwargs, body) in bodies.items():
         wrapped = _wrap(config, job_id, body)

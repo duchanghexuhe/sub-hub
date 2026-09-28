@@ -66,6 +66,16 @@ pre.preview{background:#10131b;border:1px solid var(--line);border-radius:6px;pa
 .top3 .card{flex:1;min-width:200px}
 .top3 .rank{font-size:20px;color:#ffd76b}
 .stat{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin:4px 0}
+/* ---------- 节点稳定性：健康时间块条 ---------- */
+.stab-row{display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)}
+.stab-row:last-child{border-bottom:none}
+.stab-name{flex:0 0 240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.stab-bar{flex:1;display:flex;gap:1px;min-width:160px}
+.stab-bar i{flex:1;height:14px;border-radius:2px;background:#333c52;min-width:2px}
+.stab-bar i.ok{background:var(--ok)}
+.stab-bar i.slow{background:var(--warn)}
+.stab-bar i.bad{background:var(--bad)}
+.stab-stat{flex:0 0 220px;font-size:12px;color:var(--muted);text-align:right}
 #toast{position:fixed;right:16px;bottom:16px;display:grid;gap:8px;z-index:99}
 #toast div{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--acc);padding:8px 14px;border-radius:6px;max-width:420px}
 #toast div.err{border-left-color:var(--bad)}
@@ -158,6 +168,15 @@ section h2{flex-wrap:wrap}
   </h2>
   <div class="top3" id="purity-top3"></div>
   <div id="purity-table"></div>
+</section>
+
+<!-- ③b 节点稳定性 -->
+<section id="sec-stability">
+  <h2>节点稳定性
+    <span class="hint">每格 = 一轮定时采样（默认 15 分钟，窗口 24h）：绿=通畅 黄=通但慢 红=失败 灰=无数据，悬停看详情</span>
+  </h2>
+  <div class="stat" id="stab-summary">加载中…</div>
+  <div id="stab-rows"></div>
 </section>
 
 <!-- ④ 配置产物 -->
@@ -462,6 +481,40 @@ $("#btn-scan").addEventListener("click", (ev) => {
   });
 });
 
+/* ---------- ③b 节点稳定性：健康时间块条 ---------- */
+const SLOW_MS = 500;   // 「通但慢」黄档阈值（ms）
+async function loadStability(){
+  const box = $("#stab-rows"), sum = $("#stab-summary");
+  try{
+    const data = await api("/api/health/history?hours=24");
+    const rows = data.nodes || [];
+    if(!rows.length){
+      box.innerHTML = "";
+      sum.innerHTML = "暂无采样数据。每 15 分钟自动采样一轮，数个周期后即可看到趋势（探测实例需要 mihomo 可用）.";
+      return;
+    }
+    const good = rows.filter(r => r.ok_rate >= .9).length;
+    const down = rows.filter(r => r.down_streak > 0).length;
+    sum.textContent = `窗口 24h ・ 采样节点 ${rows.length} 个 ・ 成功率≥90%：${good} 个 ・ 当前连续失败：${down} 个`;
+    box.innerHTML = rows.map(r => {
+      const cells = (r.samples || []).map(s => {
+        const cls = s.delay_ms == null ? "bad" : (s.delay_ms >= SLOW_MS ? "slow" : "ok");
+        const label = s.delay_ms == null ? "失败" : s.delay_ms + "ms";
+        return `<i class="${cls}" title="${esc(fmtTime(s.checked_at))} · ${label}"></i>`;
+      }).join("");
+      const stat = `成功率 ${(r.ok_rate*100).toFixed(0)}% ・ 均延 ${r.avg_delay == null ? "—" : r.avg_delay + "ms"}`
+        + (r.down_streak > 0 ? ` ・ <b style="color:var(--bad)">连续失败 ${r.down_streak}</b>` : "");
+      return `<div class="stab-row">
+        <div class="stab-name" title="${esc(r.node_name)}（${esc(r.source_sub)}）">${esc(r.node_name)}</div>
+        <div class="stab-bar">${cells}</div>
+        <div class="stab-stat">${stat}</div></div>`;
+    }).join("");
+  }catch(err){
+    sum.textContent = "加载失败：" + err;
+  }
+}
+setInterval(() => loadStability().catch(() => {}), 5 * 60 * 1000);
+
 /* ---------- ④ 配置产物 ---------- */
 let currentFmt = "clash";
 async function loadConfig(){
@@ -601,7 +654,7 @@ $("#mirror-form").addEventListener("submit", (ev) => {
 $("#btn-reload").addEventListener("click", () => guard($("#btn-reload"), reload));
 
 async function reload(){
-  await Promise.allSettled([loadSubs(), loadNodes(), loadAnomalies(), loadPurity(), loadConfig(), loadOps(), loadMirror()]);
+  await Promise.allSettled([loadSubs(), loadNodes(), loadAnomalies(), loadPurity(), loadStability(), loadConfig(), loadOps(), loadMirror()]);
 }
 reload();
 </script>

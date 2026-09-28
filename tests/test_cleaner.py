@@ -107,8 +107,21 @@ def test_fake_keywords_emoji_tolerant() -> None:
     assert kept == []
     assert len(FAKE_NODE_PATTERNS) == len(
         ("剩余流量", "套餐到期", "到期时间", "重置", "官网", "官址", "网址", "续费",
-         "订阅", "流量", "expire", "traffic", "电报", "频道", "群", "tg", "telegram")
-    )  # 黑名单与 docs/02 §1 原文一一对应
+         "订阅", "流量", "expire", "traffic", "电报", "频道", "群", "tg", "telegram",
+         "安装", "客户端", "软件")
+    )  # docs/02 §1 原文 + 运营补充（推广/引导下载类）一一对应
+
+
+def test_fake_promo_keywords_filtered() -> None:
+    """运营补充关键词：推广/引导下载类假节点（如「安装最新版软件使用」）被滤。"""
+    names = ["安装最新版软件使用", "请下载客户端", "软件更新通知"]
+    nodes = [make_node(n) for n in names]
+    kept = filter_fake_nodes(nodes)
+    assert kept == []
+    assert all(n.filter_reason for n in nodes)
+    # 正常节点不受误伤（名含「件/端」等单字组合不命中）
+    safe = [make_node("🇭🇰 专线-香港 01"), make_node("🇺🇸 美国 DMIT 高防机房 01")]
+    assert len(filter_fake_nodes(safe)) == 2
 
 
 def test_blacklist_matches_docs_wording() -> None:

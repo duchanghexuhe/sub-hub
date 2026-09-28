@@ -1,6 +1,9 @@
 # 运行期数据（密钥/token/订阅快照/产物/规则缓存/探测配置）——绝不入库
 data/
 
+# 本机工具（mihomo 探测二进制等）——绝不入库
+.tools/
+
 # Python
 .venv/
 __pycache__/

@@ -327,6 +327,12 @@ class TestProbeLifecycle:
 # ---------------------------------------------------------------------- probe：控制 API
 
 class TestProbeControlApi:
+    def test_client_ignores_system_proxy(self, config):
+        """控制 API 仅 127.0.0.1 可达：必须绕过系统/环境代理，否则被劫持 502。"""
+        probe = ProbeInstance(config, [])
+        assert probe._client.trust_env is False
+        probe.stop()
+
     def test_select_delay_local_proxy_url(self, config, fake_controller):
         cfg = replace(config, probe_controller_port=fake_controller.server_address[1])
         probe = ProbeInstance(cfg, [_node("🇺🇸 美国 洛杉矶 家庭宽带 01")])
@@ -613,8 +619,12 @@ class TestScan:
 
     def test_attribute_change_residential_lost_warns(self, config, store, fake_probe_cls, caplog):
         nodes = [_node("节点一"), _node("节点二")]
-        store.save_purity_result(_purity_result(nodes[0], ip_type="residential", rank=3,
-                                                exit_ip="198.51.100.1"))
+        # 种子固定在过去时刻：Windows 时钟粒度粗，now_iso() 可能与扫描首条同刻度，
+        # 同 (节点, checked_at) 主键会被 INSERT OR REPLACE 覆盖，测不出「变化」
+        prev = replace(_purity_result(nodes[0], ip_type="residential", rank=3,
+                                      exit_ip="198.51.100.1"),
+                       checked_at="2026-01-01T00:00:00.000000")
+        store.save_purity_result(prev)
         provider = FakeProvider(default=_raw(hosting=True,
                                              **{"as": "AS906 DMIT Cloud Services"},
                                              asname="DMIT Cloud Services", org="DMIT",

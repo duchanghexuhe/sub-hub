@@ -23,7 +23,7 @@ import httpx
 
 from app.config import AppConfig
 from app.models import Node, PurityResult
-from app.probe import ProbeInstance
+from app.probe import ProbeInstance, probe_instance_lock
 from app.store import Store
 from app.utils import now_iso
 
@@ -260,56 +260,58 @@ def scan(
         logger.info("纯净度扫描：无待测节点（full=%s，共 %d 个真实节点）", full, len(real_nodes))
         return PurityReport(results=[], unavailable=False, checked=0, skipped=0)
     provider = provider if provider is not None else IpApiProvider()
-    probe = ProbeInstance(config, real_nodes)
-    try:
+    # 探测实例端口与健康采样（health）共享，生命周期全程持锁串行化
+    with probe_instance_lock():
+        probe = ProbeInstance(config, real_nodes)
         try:
-            started = probe.start()
-        except Exception as exc:  # noqa: BLE001 —— 启动异常同样降级为 unavailable
-            logger.warning("探测实例启动异常，纯净度报告标记 unavailable：%s", exc)
-            started = False
-        if not started:
-            logger.warning("探测实例不可用，本轮纯净度扫描放弃（%d 个待测节点）", len(targets))
-            return PurityReport(results=[], unavailable=True, checked=0, skipped=len(targets))
-        results: list[PurityResult] = []
-        checked = 0
-        error_skips = 0
-        unavailable = False
-        for node in targets:
-            if not probe.is_available():
-                logger.warning("探测实例中途失效，剩余 %d 个节点跳过检测",
-                               len(targets) - checked - error_skips)
-                unavailable = True
-                error_skips += len(targets) - checked - error_skips
-                break
-            if probe.delay(node.name) is None:
-                logger.warning("节点 %s 探测不可达（delay 失败），跳过检测", node.name)
-                error_skips += 1
-                continue
-            if not probe.select(node.name):
-                logger.warning("节点 %s 出口切换失败（PUT /proxies/PROBE），跳过检测", node.name)
-                error_skips += 1
-                continue
             try:
-                raw = provider.lookup(proxy_url=probe.local_proxy_url())
-                result = build_purity_result(node, raw)
-                store.save_purity_result(result)
-                results.append(result)
-                checked += 1
-                _maybe_warn_attr_change(prev_map.get((node.name, node.source_sub)), result)
-            except Exception as exc:  # noqa: BLE001 —— 单节点失败只跳过计数
-                logger.warning("节点 %s 纯净度检测失败，已跳过：%s", node.name, exc)
-                error_skips += 1
-        return PurityReport(
-            results=results,
-            unavailable=unavailable,
-            checked=checked,
-            skipped=(len(real_nodes) - len(targets)) + error_skips,
-        )
-    finally:
-        try:
-            probe.stop()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("探测实例停止失败（忽略）：%s", exc)
+                started = probe.start()
+            except Exception as exc:  # noqa: BLE001 —— 启动异常同样降级为 unavailable
+                logger.warning("探测实例启动异常，纯净度报告标记 unavailable：%s", exc)
+                started = False
+            if not started:
+                logger.warning("探测实例不可用，本轮纯净度扫描放弃（%d 个待测节点）", len(targets))
+                return PurityReport(results=[], unavailable=True, checked=0, skipped=len(targets))
+            results: list[PurityResult] = []
+            checked = 0
+            error_skips = 0
+            unavailable = False
+            for node in targets:
+                if not probe.is_available():
+                    logger.warning("探测实例中途失效，剩余 %d 个节点跳过检测",
+                                   len(targets) - checked - error_skips)
+                    unavailable = True
+                    error_skips += len(targets) - checked - error_skips
+                    break
+                if probe.delay(node.name) is None:
+                    logger.warning("节点 %s 探测不可达（delay 失败），跳过检测", node.name)
+                    error_skips += 1
+                    continue
+                if not probe.select(node.name):
+                    logger.warning("节点 %s 出口切换失败（PUT /proxies/PROBE），跳过检测", node.name)
+                    error_skips += 1
+                    continue
+                try:
+                    raw = provider.lookup(proxy_url=probe.local_proxy_url())
+                    result = build_purity_result(node, raw)
+                    store.save_purity_result(result)
+                    results.append(result)
+                    checked += 1
+                    _maybe_warn_attr_change(prev_map.get((node.name, node.source_sub)), result)
+                except Exception as exc:  # noqa: BLE001 —— 单节点失败只跳过计数
+                    logger.warning("节点 %s 纯净度检测失败，已跳过：%s", node.name, exc)
+                    error_skips += 1
+            return PurityReport(
+                results=results,
+                unavailable=unavailable,
+                checked=checked,
+                skipped=(len(real_nodes) - len(targets)) + error_skips,
+            )
+        finally:
+            try:
+                probe.stop()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("探测实例停止失败（忽略）：%s", exc)
 
 
 # ---------------------------------------------------------------------- 推荐排序

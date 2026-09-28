@@ -138,6 +138,24 @@ class AttrChange:
 
 
 @dataclass
+class HealthSample:
+    """单次节点健康采样（health 定时写入，管理页「健康时间块条」消费）。
+
+    延迟只代表采样瞬间，单点无意义；由 UI 按 24h 窗口聚合出成功率/均延迟/
+    连续失败，形成时间块条。delay_ms=None 表示该轮探活失败（超时/不可达）。
+    """
+
+    node_name: str
+    source_sub: str
+    checked_at: str                             # ISO8601（同一轮采样共用同一时刻）
+    delay_ms: int | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.delay_ms is not None
+
+
+@dataclass
 class ConfigVersion:
     """一次发布的元数据（写入 data/out/v<NNNN>/meta.json，由 utils 版本目录管理）。"""
 

@@ -7,11 +7,13 @@
   SUBHUB_REFRESH_MINUTES       订阅刷新间隔（分钟），默认 30
   SUBHUB_MIRROR_HOURS          规则镜像间隔（小时），默认 6
   SUBHUB_PURITY_HOUR           纯净度每日扫描时刻（0-23 点），默认 4
+  SUBHUB_HEALTH_MINUTES        节点健康采样间隔（分钟），默认 15（0=关闭采样）
   SUBHUB_MIHOMO_PATH           mihomo 二进制路径（探测实例用），默认 "mihomo"（查 PATH）
   SUBHUB_PROBE_CONTROLLER_PORT 探测实例 external-controller 端口，默认 9095
   SUBHUB_PROBE_MIXED_PORT      探测实例混合端口，默认 9096
   SUBHUB_SKIP_ANYTLS           SR conf 是否跳过 anytls 节点，默认开（1/true/yes/on）
   SUBHUB_FETCH_UA              抓取订阅使用的 Clash UA
+  SUBHUB_AUTO_MAX_RATE         常规自动组倍率上限，默认 1.0（全库无达标倍率时自动放宽到最低档）
 
 token：分发 token 存 data/token，首次启动自动生成 32 位 hex；secret.key 由
 store 层负责（0600）。密钥与订阅 URL 永不进日志/对话/配置产物。
@@ -56,6 +58,17 @@ def _env_bool(env: Mapping[str, str], key: str, default: bool) -> bool:
     return raw.strip().lower() in _TRUTHY
 
 
+def _env_float(env: Mapping[str, str], key: str, default: float) -> float:
+    raw = env.get(key)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw.strip())
+    except ValueError:
+        logger.warning("环境变量 %s=%r 不是数字，使用默认值 %s", key, raw, default)
+        return default
+
+
 @dataclass(frozen=True)
 class AppConfig:
     """全部配置的唯一切面；各模块通过 load_config() 获取，不自行读环境变量。"""
@@ -68,11 +81,13 @@ class AppConfig:
     sub_refresh_minutes: int         # 定时任务 1：订阅刷新间隔
     rules_mirror_hours: int          # 定时任务 2：规则镜像间隔
     purity_scan_hour: int            # 定时任务 3：纯净度每日扫描时刻（点）
+    health_probe_minutes: int        # 定时任务 4：节点健康采样间隔（分钟；0=关闭）
     mihomo_path: str
     skip_anytls: bool                # SR conf 跳过 anytls（客户端 <6.3 不支持）
     probe_controller_port: int
     probe_mixed_port: int
     fetch_user_agent: str
+    auto_max_rate: float             # 常规自动组倍率上限（低倍率省流；全库无达标时放宽到最低档）
     rules_proxy: str = ""            # 规则上游直连失败时的代理回落（空=不回落）；机场订阅不受此影响
 
     # ---------- 派生路径 ----------
@@ -160,12 +175,14 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
         sub_refresh_minutes=_env_int(env, "SUBHUB_REFRESH_MINUTES", 30),
         rules_mirror_hours=_env_int(env, "SUBHUB_MIRROR_HOURS", 6),
         purity_scan_hour=_env_int(env, "SUBHUB_PURITY_HOUR", 4),
+        health_probe_minutes=_env_int(env, "SUBHUB_HEALTH_MINUTES", 15),
         mihomo_path=env.get("SUBHUB_MIHOMO_PATH", "mihomo").strip() or "mihomo",
         skip_anytls=_env_bool(env, "SUBHUB_SKIP_ANYTLS", True),
         probe_controller_port=_env_int(env, "SUBHUB_PROBE_CONTROLLER_PORT", 9095),
         probe_mixed_port=_env_int(env, "SUBHUB_PROBE_MIXED_PORT", 9096),
         fetch_user_agent=env.get("SUBHUB_FETCH_UA", "clash-verge/v2.0.0").strip()
         or "clash-verge/v2.0.0",
+        auto_max_rate=_env_float(env, "SUBHUB_AUTO_MAX_RATE", 1.0),
         rules_proxy=env.get("SUBHUB_RULES_PROXY", "").strip(),
     )
     return config

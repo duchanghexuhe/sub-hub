@@ -20,7 +20,7 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from app.models import AttrChange, FetchStatus, Node, PurityResult, Subscription
+from app.models import AttrChange, FetchStatus, HealthSample, Node, PurityResult, Subscription
 from app.utils import atomic_write_text, now_iso, restrict_permissions
 
 logger = logging.getLogger("subhub.store")
@@ -74,6 +74,16 @@ CREATE TABLE IF NOT EXISTS purity_results (
     PRIMARY KEY (node_name, source_sub, checked_at)
 );
 CREATE INDEX IF NOT EXISTS idx_purity_node ON purity_results(node_name, source_sub);
+
+CREATE TABLE IF NOT EXISTS node_health_samples (
+    node_name  TEXT NOT NULL,
+    source_sub TEXT NOT NULL,
+    checked_at TEXT NOT NULL,                      -- ISO8601（同一轮采样共用）
+    delay_ms   INTEGER,                            -- NULL=该轮探活失败
+    PRIMARY KEY (node_name, source_sub, checked_at)
+);
+CREATE INDEX IF NOT EXISTS idx_health_node_time
+    ON node_health_samples(node_name, source_sub, checked_at);
 """
 
 _PURITY_COLUMNS = (
@@ -394,6 +404,40 @@ class Store:
             claude_rank=row["claude_rank"],
             raw=json.loads(row["raw"]) if row["raw"] else None,
         )
+
+    # ------------------------------------------------------------------ node_health_samples
+
+    def save_health_samples(self, samples: list[HealthSample]) -> None:
+        """批量写入一轮健康采样（同轮共用 checked_at；失败样本 delay_ms=NULL）。"""
+        with self._lock:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO node_health_samples"
+                " (node_name, source_sub, checked_at, delay_ms) VALUES (?, ?, ?, ?)",
+                [(s.node_name, s.source_sub, s.checked_at, s.delay_ms) for s in samples],
+            )
+            self._conn.commit()
+
+    def list_health_samples(self, *, since: str) -> list[HealthSample]:
+        """窗口内（checked_at ≥ since）的全部健康样本，按时间升序。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT node_name, source_sub, checked_at, delay_ms"
+                " FROM node_health_samples WHERE checked_at >= ?"
+                " ORDER BY checked_at ASC",
+                (since,),
+            ).fetchall()
+        return [HealthSample(
+            node_name=r["node_name"], source_sub=r["source_sub"],
+            checked_at=r["checked_at"], delay_ms=r["delay_ms"],
+        ) for r in rows]
+
+    def prune_health_samples(self, *, before: str) -> int:
+        """清理保留窗口之外的过期样本，返回删除行数（每轮采样后调用）。"""
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM node_health_samples WHERE checked_at < ?", (before,))
+            self._conn.commit()
+        return cur.rowcount
 
     # ------------------------------------------------------------------
 

@@ -43,6 +43,7 @@ from app.templater import (
     G_YOUTUBE,
     OTHER_REGION_GROUP,
     PROBE_URL,
+    LAN_GUARD_RULES,
     RULE_PROVIDER_INTERVAL,
     RenderResult,
     build_groups,
@@ -341,6 +342,62 @@ def test_claude_purity_lookup_by_disambiguated_name(nodes: list[Node], config: A
     assert groups[G_CLAUDE_BACKUP]["proxies"][0] == "🇺🇸 美国 洛杉矶 家庭宽带 01 [b]"
 
 
+def test_claude_groups_admit_only_pure_nodes(nodes: list[Node], config: AppConfig):
+    """有纯净度数据时只收 claude_rank = 3（住宅级）的节点：2 分机房/未评分/0 分不得入组。"""
+    purity = [
+        PurityResult(node_name="🇺🇸 美国 洛杉矶 家庭宽带 01", source_sub="a",
+                     checked_at="2026-09-27T04:00:00.000000", claude_rank=3,
+                     ip_type="residential"),
+        PurityResult(node_name="🇺🇸 美国 DMIT 高防机房 01", source_sub="a",
+                     checked_at="2026-09-27T04:00:00.000000", claude_rank=2,
+                     ip_type="datacenter"),
+        PurityResult(node_name="🇰🇷 韩国 首尔 01", source_sub="a",
+                     checked_at="2026-09-27T04:00:00.000000", claude_rank=0,
+                     ip_type="datacenter"),
+    ]
+    groups = {g["name"]: g for g in build_groups(nodes, config=config, purity=purity)}
+    # 仅 3 分住宅节点入组；2 分机房、0 分韩国、未检测的其余节点全部排除，专用/备援同池
+    assert groups[G_CLAUDE]["proxies"] == ["🇺🇸 美国 洛杉矶 家庭宽带 01"]
+    assert groups[G_CLAUDE_BACKUP]["proxies"] == ["🇺🇸 美国 洛杉矶 家庭宽带 01"]
+
+
+def test_claude_groups_full_pool_without_purity(nodes: list[Node], config: AppConfig):
+    """无任何合格数据（未扫描/探测不可用）时全量池兜底：mihomo 拒载空组。"""
+    groups = {g["name"]: g for g in build_groups(nodes, config=config)}
+    real = sorted(n.name for n in nodes if not n.filtered)
+    assert sorted(groups[G_CLAUDE]["proxies"]) == real
+    assert sorted(groups[G_CLAUDE_BACKUP]["proxies"]) == real
+
+
+# ---------------------------------------------------------------- 常规自动：低倍率
+
+def _rate_node(name: str, rate: float) -> Node:
+    return Node(name=name, type="vless", server="s.example.com", port=443,
+                source_sub="t", region="US", rate=rate)
+
+
+def test_auto_group_low_rate_only(config: AppConfig):
+    """阈值默认 1.0：常规自动只收 ≤1x 节点，高价档供其它专用组。"""
+    nodes = [_rate_node("🇺🇸 美国 a x0.5", 0.5), _rate_node("🇺🇸 美国 b", 1.0),
+             _rate_node("🇺🇸 美国 c x2", 2.0), _rate_node("🇺🇸 美国 d x3", 3.0)]
+    groups = {g["name"]: g for g in build_groups(nodes, config=config)}
+    assert groups[G_AUTO]["proxies"] == ["🇺🇸 美国 a x0.5", "🇺🇸 美国 b"]
+
+
+def test_auto_group_threshold_relaxes_to_min_rate(config: AppConfig):
+    """全库无 ≤阈值 节点时阈值放宽到最低倍率档：省流语义始终成立且组非空。"""
+    nodes = [_rate_node("🇺🇸 美国 a x2", 2.0), _rate_node("🇺🇸 美国 b x3", 3.0)]
+    groups = {g["name"]: g for g in build_groups(nodes, config=config)}
+    assert groups[G_AUTO]["proxies"] == ["🇺🇸 美国 a x2"]
+
+
+def test_auto_group_threshold_configurable(config: AppConfig):
+    config = replace(config, auto_max_rate=3.0)
+    nodes = [_rate_node("🇺🇸 美国 a x2", 2.0), _rate_node("🇺🇸 美国 b x3", 3.0)]
+    groups = {g["name"]: g for g in build_groups(nodes, config=config)}
+    assert groups[G_AUTO]["proxies"] == ["🇺🇸 美国 a x2", "🇺🇸 美国 b x3"]
+
+
 def test_us_groups_fallback_without_us_nodes(config: AppConfig, sub_a_path: Path):
     nodes = [n for n in _load_fixture_nodes(sub_a_path, "a")
              if not n.filtered and n.region != "US"]
@@ -385,6 +442,18 @@ def test_render_four_artifacts_valid_and_consistent(rendered: RenderResult):
     assert check_consistency(rendered.clash_yaml, rendered.sr_conf) == []
 
 
+def test_clash_renders_sniffer_for_domainless_traffic(rendered: RenderResult):
+    """sniffer 段必须随主/离线版渲染：浏览器 DoH/ECH 自行解析产生的裸 IP 连接
+    不带域名，无 SNI/QUIC 嗅探时全部域名规则失效、claude.com 等直接落漏网之鱼
+    （2026-09-28 校准）。"""
+    for text in (rendered.clash_yaml, rendered.clash_offline_yaml):
+        sniffer = _clash_doc(text)["sniffer"]
+        assert sniffer["enable"] is True
+        assert sniffer["parse-pure-ip"] is True
+        assert set(sniffer["sniff"]) == {"HTTP", "TLS", "QUIC"}
+        assert sniffer["sniff"]["QUIC"]["ports"] == [443, 8443]
+
+
 def test_group_sets_equal_between_formats(rendered: RenderResult):
     clash_names = [g["name"] for g in _clash_doc(rendered.clash_yaml)["proxy-groups"]]
     sr_names = []
@@ -395,15 +464,16 @@ def test_group_sets_equal_between_formats(rendered: RenderResult):
 
 
 def test_rule_chain_order_matches_manifest(rendered: RenderResult, rules, config: AppConfig):
-    expected = [f"RULE-SET,{e.name},{e.policy}" for e in rules]
+    expected = [*LAN_GUARD_RULES, *(f"RULE-SET,{e.name},{e.policy}" for e in rules)]
     expected.append("MATCH,🐟 漏网之鱼")
     doc = _clash_doc(rendered.clash_yaml)
     assert doc["rules"] == expected
-    assert doc["rules"][0] == "RULE-SET,claude-extra,🛑 Claude 专用"  # 自维护补丁最前
+    assert doc["rules"][len(LAN_GUARD_RULES)] == "RULE-SET,claude-extra,🛑 Claude 专用"  # 自维护补丁最前
     assert doc["rules"][-1] == "MATCH,🐟 漏网之鱼"
     # SR 主版本规则链同序
     sr_rules = _sr_section(rendered.sr_conf, "Rule")
-    assert sr_rules[0] == f"RULE-SET,{config.base_url}/rules/claude-extra.list,🛑 Claude 专用"
+    assert sr_rules[:len(LAN_GUARD_RULES)] == list(LAN_GUARD_RULES)      # LAN 护栏前置
+    assert sr_rules[len(LAN_GUARD_RULES)] == f"RULE-SET,{config.base_url}/rules/claude-extra.list,🛑 Claude 专用"
     assert sr_rules[-1] == "FINAL,🐟 漏网之鱼"
     assert len(sr_rules) == len(expected)
 
@@ -421,7 +491,7 @@ def test_main_versions_reference_nas_rules(rendered: RenderResult, config: AppCo
         "url": f"{config.base_url}/rules/claude-extra.yaml",
         "interval": RULE_PROVIDER_INTERVAL,
     }
-    assert all(p["type"] == "http" and p["interval"] == 86400
+    assert all(p["type"] == "http" and p["interval"] == RULE_PROVIDER_INTERVAL
                for p in doc["rule-providers"].values())
     assert f"{config.base_url}/rules/" in rendered.sr_conf
 
@@ -512,6 +582,7 @@ def test_validate_clash_rejects_malformed():
     assert any("ftp" in e for e in errors)      # 非法 provider 类型
     assert any("missing" in e for e in errors)  # 引用不存在的 provider
     assert any("MATCH" in e for e in errors)    # 缺少 MATCH 兜底
+    assert any("sniffer" in e for e in errors)  # 缺少 sniffer 段
 
 
 def test_validate_sr_rejects_malformed():

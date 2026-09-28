@@ -93,6 +93,9 @@ def validate_clash_yaml(text: str) -> list[str]:
             errors.append("dns.nameserver 必须为非空列表")
         if not isinstance(dns.get("fake-ip-filter"), list) or not dns.get("fake-ip-filter"):
             errors.append("dns.fake-ip-filter 必须为非空列表")
+    sniffer = doc.get("sniffer")
+    if not isinstance(sniffer, dict) or sniffer.get("enable") is not True:
+        errors.append("缺少 sniffer 配置段（裸 IP 连接靠 SNI 嗅探恢复域名，否则域名规则全部失效）")
 
     # proxies
     proxies = doc.get("proxies")
@@ -201,16 +204,20 @@ def validate_clash_yaml(text: str) -> list[str]:
             if i != len(rules) - 1:
                 errors.append("MATCH 必须是最后一条规则")
             continue
-        policy = parts[-1]
-        if policy not in known_policies:
-            errors.append(f"rules 第 {i + 1} 条的策略不存在：{policy}")
         if parts[0] == "RULE-SET":
             if len(parts) != 3:
                 errors.append(f"RULE-SET 规则格式非法：{rule}")
             elif parts[1] not in providers:
                 errors.append(f"RULE-SET 引用了不存在的 rule-provider：{parts[1]}")
-        elif len(parts) < 2:
+            continue
+        if len(parts) < 3:
             errors.append(f"rules 第 {i + 1} 条格式非法：{rule}")
+            continue
+        policy = parts[2]
+        if policy not in known_policies:
+            errors.append(f"rules 第 {i + 1} 条的策略不存在：{policy}")
+        if len(parts) > 3 and parts[3] != "no-resolve":
+            errors.append(f"rules 第 {i + 1} 条的尾参只允许 no-resolve：{rule}")
     if rules and not match_seen:
         errors.append("rules 缺少 MATCH 兜底规则")
 
@@ -338,11 +345,19 @@ def validate_sr_conf(text: str) -> list[str]:
             if len(parts) != 2:
                 errors.append(f"[Rule] 第 {lineno} 行 FINAL 格式非法：{line}")
             continue
-        policy = parts[-1]
+        if parts[0] == "RULE-SET":
+            if len(parts) != 3:
+                errors.append(f"[Rule] 第 {lineno} 行 RULE-SET 格式非法：{line}")
+            policy = parts[2]
+        elif len(parts) < 3:
+            errors.append(f"[Rule] 第 {lineno} 行格式非法：{line}")
+            continue
+        else:
+            policy = parts[2]
+            if len(parts) > 3 and parts[3] != "no-resolve":
+                errors.append(f"[Rule] 第 {lineno} 行尾参只允许 no-resolve：{line}")
         if policy not in known_policies:
             errors.append(f"[Rule] 第 {lineno} 行策略不存在：{policy}")
-        if parts[0] == "RULE-SET" and len(parts) != 3:
-            errors.append(f"[Rule] 第 {lineno} 行 RULE-SET 格式非法：{line}")
     if not rule_lines[-1].startswith("FINAL"):
         errors.append("[Rule] 最后一条必须是 FINAL")
 

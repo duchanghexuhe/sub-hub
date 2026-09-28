@@ -40,7 +40,7 @@ CLAUDE_BACKUP_INTERVAL = 90    # 🧷 Claude 备援间隔（秒），lazy=false
 HEALTH_TOLERANCE = 40          # 防延迟抖动来回切换（ms）
 HEALTH_MAX_FAILED = 3          # 连续失败即标记不可用
 HEALTH_TIMEOUT = 3000          # 快速判死（ms）
-RULE_PROVIDER_INTERVAL = 86400  # rule-providers 更新间隔（秒）
+RULE_PROVIDER_INTERVAL = 21600  # rule-providers 更新间隔（秒）；6h——拉取失败最迟 6h 自愈，局域网流量代价可忽略
 
 # 固定组名（地区组之外的全部组，顺序即 proxy-groups 中的出现顺序）
 G_MAIN = "🚀 节点选择"
@@ -62,6 +62,11 @@ G_MICROSOFT = "Ⓜ️ 微软服务"
 G_APPLE = "🍎 苹果服务"
 G_GAME = "🎮 游戏平台"
 G_FINAL = "🐟 漏网之鱼"
+
+CLAUDE_MIN_RANK = 3
+"""Claude 专用/备援准入线：纯净度 claude_rank = 3（住宅/家宽/mobile 级出口）才可入组；
+干净中小机房 2、大厂云 1、代理标记 0 一票否决，未检测节点无资格——劣质节点不如不用。
+全库无合格节点（未扫描/探测不可用）时回退全量候选池：mihomo 拒载空组，组不可为空是硬约束。"""
 
 FIXED_GROUP_ORDER: tuple[str, ...] = (
     G_MAIN, G_AUTO, G_US, G_CLAUDE, G_CLAUDE_BACKUP,
@@ -290,6 +295,21 @@ def order_claude_candidates(nodes: list[Node],
     return sorted(nodes, key=sort_key)
 
 
+def _claude_pool(real: list[Node], purity: list[PurityResult] | None) -> list[Node]:
+    """Claude 专用/备援候选池：只收 claude_rank ≥ CLAUDE_MIN_RANK 的已检测节点。
+
+    未检测（无结果/未评分）节点一律不得入组——劣质节点不如不用；全库无合格
+    节点（未扫描/探测不可用）时回退全量真实节点池，mihomo 拒载空组是硬约束。
+    """
+    pmap = _purity_map(purity)
+    admitted = [
+        n for n in real
+        if (r := pmap.get((n.source_sub, n.name))) is not None
+        and r.claude_rank is not None and int(r.claude_rank) >= CLAUDE_MIN_RANK
+    ]
+    return admitted or real
+
+
 # ---------------------------------------------------------------- 分组计算
 
 def build_groups(nodes: list[Node], *, config: AppConfig,
@@ -302,9 +322,11 @@ def build_groups(nodes: list[Node], *, config: AppConfig,
       全量节点，保证两格式组集合一致（某地区在 SR 可见集为空时成员回退 [♻️ 常规自动]）；
     - 美国系组（⛳ 美国优质 / 🎁 / 🤖 / 🐙）恒生成，无美国可见节点时成员回退
       [♻️ 常规自动]，避免空 url-test 组导致 mihomo 拒载；
-    - purity：纯净度结果（可为空），驱动 Claude 专用组排序。
+    - ♻️ 常规自动只收低倍率：成员为倍率 ≤ max(config.auto_max_rate, 全库最低倍率)
+      的节点（省流：常规流量不走高价档；全库无达标倍率时阈值自动放宽到最低档）；
+    - purity：纯净度结果（可为空）。有数据时 Claude 专用/备援只收 claude_rank ≥
+      CLAUDE_MIN_RANK 的节点，无合格数据时全量池兜底（组不可为空）。
     """
-    _ = config  # 预留：探活参数未来外置到 AppConfig
     real = _real_nodes(nodes)
     presence = _real_nodes(region_presence_nodes) if region_presence_nodes is not None else real
 
@@ -316,7 +338,8 @@ def build_groups(nodes: list[Node], *, config: AppConfig,
 
     all_names = [n.name for n in real]
     us_names = [n.name for n in real if n.region == "US"] or [G_AUTO]
-    claude_members = [n.name for n in order_claude_candidates(real, purity)]
+    claude_members = [n.name for n in
+                      order_claude_candidates(_claude_pool(real, purity), purity)]
 
     groups: list[dict] = []
     # 1. 🚀 节点选择：常规自动 → 各地区组 → DIRECT → 全部节点
@@ -324,8 +347,13 @@ def build_groups(nodes: list[Node], *, config: AppConfig,
         "name": G_MAIN, "type": "select",
         "proxies": [G_AUTO, *region_names, "DIRECT", *all_names],
     })
-    # 2. ♻️ 常规自动：全部真实节点
-    groups.append(_url_test_group(G_AUTO, all_names))
+    # 2. ♻️ 常规自动：低倍率节点（倍率 ≤ max(阈值, 全库最低倍率)；空池兜底全量）
+    if real:
+        cutoff = max(config.auto_max_rate, min(n.rate for n in real))
+        auto_names = [n.name for n in real if n.rate <= cutoff]
+    else:
+        auto_names = []
+    groups.append(_url_test_group(G_AUTO, auto_names or list(all_names)))
     # 3. 地区组（按需生成；url-test）
     for code in present_codes:
         members = [n.name for n in by_region.get(code, [])] or [G_AUTO]
@@ -373,9 +401,24 @@ def build_groups(nodes: list[Node], *, config: AppConfig,
 
 # ---------------------------------------------------------------- 规则链与 rule-providers
 
+LAN_GUARD_RULES: tuple[str, ...] = (
+    "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+    "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+    "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+    "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+)
+"""规则链最前端的内建 LAN 直连护栏。
+
+mihomo 拉取 rule-provider 的请求同样经过规则引擎：内核启动时若规则集尚未加载，
+该请求会落 MATCH 走代理出去，机场侧无法回源内网 IP（NAS），拉取失败且要等
+interval 才重试——全部规则集空转一整天（2026-09-28 claude.com 落漏网之鱼实测）。
+内建静态 IP-CIDR 规则不依赖任何 provider，从根上断掉该死锁；no-resolve 使
+域名连接跳过匹配，仅裸 IP 命中。SR [Rule] 段同样前置。"""
+
+
 def _clash_rule_lines(rules: list[RuleEntry]) -> list[str]:
     """mihomo rules 列表：RULE-SET,<名>,<组> 按清单顺序 + MATCH 落漏网之鱼。"""
-    lines = [f"RULE-SET,{e.name},{e.policy}" for e in rules]
+    lines = [*LAN_GUARD_RULES, *(f"RULE-SET,{e.name},{e.policy}" for e in rules)]
     lines.append(f"MATCH,{G_FINAL}")
     return lines
 
@@ -462,7 +505,7 @@ def _payload_line_to_sr_rule(line: str, policy: str) -> str:
 
 def _sr_rule_lines(rules: list[RuleEntry], config: AppConfig, *, offline: bool) -> list[str]:
     """SR [Rule] 行：主版本 RULE-SET 指 NAS 的 .list；离线版直接展开规则内容。"""
-    lines: list[str] = []
+    lines: list[str] = list(LAN_GUARD_RULES)
     for entry in rules:
         if offline:
             payload = _inline_payload(entry, config)

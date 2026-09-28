@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from urllib.parse import quote
@@ -29,6 +30,15 @@ logger = logging.getLogger("subhub.probe")
 
 PROBE_GROUP = "PROBE"
 """探测实例内置的专用 select 组名：purity 经 PUT /proxies/PROBE 切换全局出口。"""
+
+_INSTANCE_LOCK = threading.Lock()
+"""探测实例互斥锁：纯净度扫描与健康采样（health）共用同一组 127.0.0.1 端口，
+两任务并发时后到者等待，避免第二个 mihomo 绑定失败导致整轮标记不可用。"""
+
+
+def probe_instance_lock() -> threading.Lock:
+    """探测实例生命周期互斥锁（purity.scan 与 health.sample_once 的 start→stop 全程持有）。"""
+    return _INSTANCE_LOCK
 
 PROBE_DELAY_URL = "http://cp.cloudflare.com/generate_204"
 """节点可达性探测 URL（与 docs/02 测速参数规范一致）。"""
@@ -49,6 +59,7 @@ class ProbeInstance:
         self._client = httpx.Client(
             base_url=f"http://127.0.0.1:{config.probe_controller_port}",
             timeout=httpx.Timeout(_CONTROL_TIMEOUT),
+            trust_env=False,  # 控制 API 仅 127.0.0.1：必须绕过系统/环境代理（否则被劫持 502）
         )
 
     # ------------------------------------------------------------------ 属性

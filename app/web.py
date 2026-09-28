@@ -766,6 +766,18 @@ def _register_routes(app: FastAPI) -> None:
             "results": [_purity_public(r) for r in getattr(report, "results", None) or []],
         }
 
+    @app.get("/api/health/history")
+    def health_history(
+        hours: int = 24,
+        st: Store = Depends(get_st),
+    ) -> dict[str, Any]:
+        """节点稳定性窗口聚合（健康时间块条数据源）；health 模块缺失时返回空集。"""
+        hours = min(max(hours, 1), 168)
+        health_mod = _optional_module("app.health")
+        if health_mod is None or not hasattr(health_mod, "history_report"):
+            return {"window_hours": hours, "sample_total": 0, "nodes": []}
+        return health_mod.history_report(st, window_hours=hours)
+
     # ---------- 配置产物 ----------
 
     @app.get("/api/config/preview")

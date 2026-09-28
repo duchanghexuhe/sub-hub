@@ -205,8 +205,9 @@ class TestFullChainPublish:
         vdir = utils.version_dir(e2e_config.out_dir, published.version)
         doc = _clash_doc((vdir / "clash.yaml").read_text(encoding="utf-8"))
         assert len(doc["proxies"]) == 15                      # 15 个真实节点
-        assert len(doc["rules"]) == 26 + 1                    # 26 条 RULE-SET + MATCH
+        assert len(doc["rules"]) == 26 + 4 + 1                # 4 条内建 LAN 护栏 + 26 条 RULE-SET + MATCH
         assert doc["rules"][-1] == f"MATCH,{G_FINAL}"
+        assert doc["sniffer"]["enable"] is True       # 裸 IP 连接靠嗅探恢复域名
 
     def test_group_names_complete(self, e2e_config: AppConfig,
                                   published: pipeline.PipelineResult):
@@ -244,7 +245,7 @@ class TestFullChainPublish:
         for name, spec in doc["rule-providers"].items():
             assert spec["type"] == "http", name
             assert spec["url"] == f"{e2e_config.base_url}/rules/{manifest[name].clash_file}", name
-            assert spec["interval"] == 86400, name
+            assert spec["interval"] == 21600, name
         # SR 主版本 RULE-SET 同样全部指向 NAS
         sr = (vdir / "shadowrocket.conf").read_text(encoding="utf-8")
         rule_sets = [ln for ln in _sr_section(sr, "Rule") if ln.startswith("RULE-SET,")]
@@ -305,7 +306,7 @@ class TestFullChainPublish:
             for marker in FAKE_MARKERS:
                 assert marker not in text, f"{name} 出现假节点特征词「{marker}」"
 
-    def test_disambiguation_suffix_applied(self, e2e_config: AppConfig,
+    def test_disambiguation_suffix_applied(self, e2e_config: AppConfig, e2e_store: Store,
                                            published: pipeline.PipelineResult):
         vdir = utils.version_dir(e2e_config.out_dir, published.version)
         doc = _clash_doc((vdir / "clash.yaml").read_text(encoding="utf-8"))
@@ -322,9 +323,11 @@ class TestFullChainPublish:
         # 消歧后 Claude 专用组首位为美国家宽（docs/02 静态排序）
         claude = next(g for g in doc["proxy-groups"] if g["name"] == G_CLAUDE)
         assert set(claude["proxies"][:2]) == {SAME_NAME_A, SAME_NAME_B}
-        # ♻️ 常规自动 = 全部 15 个真实节点
+        # ♻️ 常规自动 = 低倍率节点（倍率 ≤ max(阈值, 全库最低倍率)；文档见 templater）
         auto = next(g for g in doc["proxy-groups"] if g["name"] == G_AUTO)
-        assert sorted(auto["proxies"]) == sorted(proxy_names)
+        real = [n for n in e2e_store.list_nodes() if not n.filtered]
+        cutoff = max(e2e_config.auto_max_rate, min(n.rate for n in real))
+        assert sorted(auto["proxies"]) == sorted(n.name for n in real if n.rate <= cutoff)
 
     def test_snapshots_and_userinfo_persisted(self, e2e_config: AppConfig, e2e_store: Store,
                                               published: pipeline.PipelineResult):

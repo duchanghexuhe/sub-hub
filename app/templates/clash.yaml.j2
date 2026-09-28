@@ -46,6 +46,25 @@ dns:
     - https://doh.pub/dns-query
     - https://dns.alidns.com/dns-query
 
+# 浏览器 DoH/安全 DNS、ECH 或 App 自带解析产生的裸 IP 连接不带域名，
+# 无嗅探时全部域名规则失效、claude.com 等直接落漏网之鱼
+sniffer:
+  enable: true
+  sniff:
+    HTTP:
+      ports: [80, "8080-8880"]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
+  force-dns-mapping: true
+  parse-pure-ip: true
+  override-destination: false
+  skip-domain:
+    - "+.push.apple.com"
+    - "Mijia Cloud"
+
 proxies:
 {% for block in proxy_blocks %}{{ block }}
 {% endfor %}

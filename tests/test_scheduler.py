@@ -16,6 +16,7 @@ import pytest
 from app.config import load_config
 from app.models import Node
 from app.scheduler import (
+    JOB_HEALTH_PROBE,
     JOB_IDS,
     JOB_PURITY_SCAN,
     JOB_RULES_MIRROR,
@@ -35,10 +36,11 @@ def _fake_module(name: str, **attrs: object) -> types.ModuleType:
 
 # ------------------------------------------------------------------ 注册与间隔
 
-def test_registers_three_jobs_with_config_intervals(data_dir, monkeypatch, store):
+def test_registers_four_jobs_with_config_intervals(data_dir, monkeypatch, store):
     monkeypatch.setenv("SUBHUB_REFRESH_MINUTES", "45")
     monkeypatch.setenv("SUBHUB_MIRROR_HOURS", "7")
     monkeypatch.setenv("SUBHUB_PURITY_HOUR", "5")
+    monkeypatch.setenv("SUBHUB_HEALTH_MINUTES", "20")
     config = load_config()
     scheduler = create_scheduler(config, store)
 
@@ -47,8 +49,18 @@ def test_registers_three_jobs_with_config_intervals(data_dir, monkeypatch, store
     assert jobs[JOB_SUB_REFRESH].trigger.interval == timedelta(minutes=45)
     assert jobs[JOB_RULES_MIRROR].trigger.interval == timedelta(hours=7)
     assert str(jobs[JOB_PURITY_SCAN].trigger) == "cron[hour='5', minute='0']"
+    assert jobs[JOB_HEALTH_PROBE].trigger.interval == timedelta(minutes=20)
     # create_scheduler 只装配不启动（启动/关闭挂在应用生命周期）
     assert scheduler.running is False
+
+
+def test_health_probe_disabled_when_minutes_zero(data_dir, monkeypatch, store):
+    """SUBHUB_HEALTH_MINUTES=0 → 不注册采样任务（其余三任务照常）。"""
+    monkeypatch.setenv("SUBHUB_HEALTH_MINUTES", "0")
+    scheduler = create_scheduler(load_config(), store)
+    jobs = {job.id: job for job in scheduler.get_jobs()}
+    assert JOB_HEALTH_PROBE not in jobs
+    assert set(jobs) == set(JOB_IDS) - {JOB_HEALTH_PROBE}
 
 
 def test_default_intervals_from_config(config, store):
@@ -57,6 +69,7 @@ def test_default_intervals_from_config(config, store):
     assert jobs[JOB_SUB_REFRESH].trigger.interval == timedelta(minutes=30)
     assert jobs[JOB_RULES_MIRROR].trigger.interval == timedelta(hours=6)
     assert str(jobs[JOB_PURITY_SCAN].trigger) == "cron[hour='4', minute='0']"
+    assert jobs[JOB_HEALTH_PROBE].trigger.interval == timedelta(minutes=15)
 
 
 # ------------------------------------------------------------------ 作业执行与状态

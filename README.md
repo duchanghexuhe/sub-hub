@@ -9,13 +9,19 @@
 
 - **AI 精细分流**：Claude / OpenAI / Gemini / Copilot / Grok / Perplexity / Cursor 各自独立分组；
   🛑 Claude 专用组为 select 手动锁定 + 🧷 备援 fallback（90s），防 IP 跳变封号；
+  两组仅收三星纯净度节点（claude_rank = 3，住宅/家宽/mobile 级出口；机房/代理标记/未检测一律排除；无数据时全量池兜底）；
 - **快速切换**：url-test/fallback 统一 interval 120s（关键组 90s）、tolerance 40ms、
   max-failed-times 3、timeout 3000ms、探活 `http://cp.cloudflare.com/generate_204`；
-- **多机场合并**：节点合并、跨订阅重名自动追加「 [别名]」后缀、假节点（剩余流量/官网/套餐到期类）过滤；
+- **多机场合并**：节点合并、跨订阅重名自动追加「 [别名]」后缀、假节点（剩余流量/官网/套餐到期/
+  推广下载类）过滤；
+- **低倍率省流**：♻️ 常规自动只收低倍率节点（≤ max(`SUBHUB_AUTO_MAX_RATE`，默认 1.0，
+  全库最低倍率)），常规流量不烧高价档；
 - **规则自托管**：blackmatrix7 等上游规则定时镜像到容器缓存（永不失效：上游断更沿用旧缓存/内置基线），
   客户端 RULE-SET 全部指向 NAS；另产出规则全内联的离线自包含版，外网本地导入兜底；
 - **纯净度检测**：内置 mihomo 探测实例逐节点检测出口 IP 属性（ASN/住宅机房/代理信号），
   驱动 Claude 组推荐排序与「家宽→机房」告警；探测故障不影响分发主链路；
+- **节点稳定性时间块条**：定时（默认 15 分钟）采样全部节点延迟/可达性并落库（保留 7 天），
+  管理页按 24h 窗口渲染健康时间块条（绿=通畅 黄=通但慢 红=失败）+ 成功率/均延/连续失败；
 - **版本与回退**：`data/out/v<NNNN>/` 保留最近 5 版，校验不过拒绝发布、可一键回退。
 
 设计文档见 [docs/](docs/)：[架构与数据流](docs/01-架构与数据流.md) ·
@@ -57,7 +63,9 @@ curl http://127.0.0.1:18399/api/health
 常用环境变量（全部可缺省，见 `app/config.py` 模块 docstring）：
 `SUBHUB_DATA_DIR` / `SUBHUB_HOST` / `SUBHUB_PORT` / `SUBHUB_NAS_HOST` /
 `SUBHUB_REFRESH_MINUTES`(30) / `SUBHUB_MIRROR_HOURS`(6) / `SUBHUB_PURITY_HOUR`(4) /
-`SUBHUB_SKIP_ANYTLS`(开) / `SUBHUB_PROBE_CONTROLLER_PORT`(9095) / `SUBHUB_PROBE_MIXED_PORT`(9096)。
+`SUBHUB_HEALTH_MINUTES`(15，节点健康采样间隔，0=关闭) /
+`SUBHUB_SKIP_ANYTLS`(开) / `SUBHUB_PROBE_CONTROLLER_PORT`(9095) / `SUBHUB_PROBE_MIXED_PORT`(9096) /
+`SUBHUB_AUTO_MAX_RATE`(1.0，常规自动组倍率上限)。
 
 纯净度扫描需要 `mihomo` 二进制（查 PATH 或 `SUBHUB_MIHOMO_PATH`）；缺失时纯净度报告
 标记「不可用」，其余功能不受影响。
