@@ -190,7 +190,7 @@ def test_load_rules_manifest_order_and_policy():
     assert entries[0].name == "claude-extra"
     assert entries[0].policy == "🛑 Claude 专用"
     assert entries[-1].name == "Download"
-    assert len(entries) == 26
+    assert len(entries) == 29
     by_name = {e.name: e for e in entries}
     assert by_name["Claude"].policy == "🛑 Claude 专用"
     assert by_name["OpenAI"].policy == "🎁 OpenAI"
@@ -494,7 +494,7 @@ def test_ai_streaming_vendor_final_members(nodes: list[Node], config: AppConfig)
     assert groups[G_MICROSOFT]["proxies"][0] == "DIRECT"     # 默认 DIRECT
     assert groups[G_APPLE]["proxies"][0] == "DIRECT"
     assert groups[G_GAME]["proxies"][0] == "DIRECT"
-    assert groups[G_FINAL]["proxies"] == [G_MAIN, G_AUTO, "DIRECT"]
+    assert groups[G_FINAL]["proxies"] == ["DIRECT", G_MAIN, G_AUTO]
 
 
 def test_filtered_nodes_never_rendered(nodes: list[Node], config: AppConfig, rules):
@@ -605,6 +605,10 @@ def test_offline_inline_payload_sources(rendered: RenderResult, config: AppConfi
     assert "IP-CIDR,1.0.1.0/24,DIRECT" in sr_rules
     # 无缓存的规则集渲染为空 payload 并保持结构合法（告警由日志承担）
     assert providers["ChinaMax"]["payload"] == []
+    # manifest 兜底（futu-extra 无缓存）：domains/ips 规范成 TYPE,value 行（classical 硬要求）
+    assert providers["futu-extra"]["payload"][:2] == \
+        ["DOMAIN-SUFFIX,futu.cn", "DOMAIN-SUFFIX,futu.com"]
+    assert "DOMAIN-SUFFIX,futu5.com,DIRECT" in sr_rules
 
 
 def test_sr_proxy_direct_mapping(rendered: RenderResult, config: AppConfig):

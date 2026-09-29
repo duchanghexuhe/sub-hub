@@ -255,14 +255,20 @@ def payload_yaml_to_list(data: bytes) -> str:
 
 # ---------------------------------------------------------------- 内置基线与占位
 
-def _render_domain_rule(domains: list[str]) -> tuple[str, str]:
-    """按 manifest 的 domains 列表生成 (yaml 文本, list 文本)——DOMAIN-SUFFIX 形态。"""
+def _render_builtin_rule(domains: list[str], ipcidrs: list[str] | None = None) -> tuple[str, str]:
+    """按 manifest 的 domains/ips 生成 (yaml 文本, list 文本)——DOMAIN-SUFFIX / IP-CIDR 形态。
+
+    IP 行不带 no-resolve：SR 端 templater._payload_line_to_sr_rule 对含逗号行原样
+    追加策略，落成 `IP-CIDR,段,DIRECT`（no-resolve 夹在值与策略之间是非法语法）。
+    """
     header = [
-        "# 本文件由 sub-hub rulesync 依据 rules_manifest.yaml 的 domains 生成（内置自维护规则）",
-        "# 请勿手工编辑；增删域名请改 rules_manifest.yaml 后重跑 build_baselines()",
+        "# 本文件由 sub-hub rulesync 依据 rules_manifest.yaml 的 domains/ips 生成（内置自维护规则）",
+        "# 请勿手工编辑；增删请改 rules_manifest.yaml 后重跑 build_baselines()",
     ]
-    yaml_text = "\n".join(header + ["payload:"] + [f"  - DOMAIN-SUFFIX,{d}" for d in domains]) + "\n"
-    list_text = "\n".join(header + [f"DOMAIN-SUFFIX,{d}" for d in domains]) + "\n"
+    payload_lines = [f"DOMAIN-SUFFIX,{d}" for d in domains]
+    payload_lines += [f"IP-CIDR,{i}" for i in (ipcidrs or [])]
+    yaml_text = "\n".join(header + ["payload:"] + [f"  - {ln}" for ln in payload_lines]) + "\n"
+    list_text = "\n".join(header + payload_lines) + "\n"
     return yaml_text, list_text
 
 
@@ -298,13 +304,13 @@ def placeholder_rule_files(config: Any) -> list[str]:
     )
 
 
-def _builtin_content(fname: str, domains: list[str]) -> bytes | None:
-    """builtin 规则的文件内容：内置基线优先，缺失时按 manifest domains 现场生成。"""
+def _builtin_content(fname: str, domains: list[str], ipcidrs: list[str] | None = None) -> bytes | None:
+    """builtin 规则的文件内容：内置基线优先，缺失时按 manifest domains/ips 现场生成。"""
     src = BASELINE_DIR / fname
     if src.exists():
         return src.read_bytes()
-    if domains:
-        yaml_text, list_text = _render_domain_rule(domains)
+    if domains or ipcidrs:
+        yaml_text, list_text = _render_builtin_rule(domains, ipcidrs)
         return (yaml_text if fname.endswith(".yaml") else list_text).encode("utf-8")
     return None
 
@@ -398,11 +404,12 @@ def _sync_rules_inner(
         status = RuleStatus(name=name)
         details[name] = status
 
-        # ---- builtin：不依赖网络，直接取内置基线（或按 domains 生成）----
+        # ---- builtin：不依赖网络，直接取内置基线（或按 domains/ips 生成）----
         if source == "builtin":
+            ipcidrs = [str(i).strip() for i in (_entry_get(e, "ips") or []) if str(i).strip()]
             all_ok = True
             for fname in (clash_file, sr_file):
-                content = _builtin_content(fname, domains)
+                content = _builtin_content(fname, domains, ipcidrs)
                 target = rules_dir / fname
                 if content is not None:
                     atomic_write_bytes(target, content)
@@ -615,12 +622,13 @@ def build_baselines(
 
         if source == "builtin":
             domains = [str(d).strip() for d in (_entry_get(e, "domains") or []) if str(d).strip()]
+            ipcidrs = [str(i).strip() for i in (_entry_get(e, "ips") or []) if str(i).strip()]
             for fname in (clash_file, sr_file):
                 p = target / fname
                 if p.exists():
                     files[fname] = "kept"
-                elif domains:
-                    yaml_text, list_text = _render_domain_rule(domains)
+                elif domains or ipcidrs:
+                    yaml_text, list_text = _render_builtin_rule(domains, ipcidrs)
                     atomic_write_text(p, yaml_text if fname.endswith(".yaml") else list_text)
                     files[fname] = "generated"
                 else:

@@ -1,0 +1,42 @@
+# 本文件由 sub-hub rulesync 依据 rules_manifest.yaml 的 domains 生成（内置自维护规则）
+# 请勿手工编辑；增删域名请改 rules_manifest.yaml 后重跑 build_baselines()
+payload:
+  - DOMAIN-SUFFIX,futu.cn
+  - DOMAIN-SUFFIX,futu.com
+  - DOMAIN-SUFFIX,futu5.com
+  - DOMAIN-SUFFIX,futubull.cn
+  - DOMAIN-SUFFIX,futuniuniu.com
+  - DOMAIN-SUFFIX,futunn.com
+  - DOMAIN-SUFFIX,futuhk.com
+  - DOMAIN-SUFFIX,futuhk1.com
+  - DOMAIN-SUFFIX,futuhk2.com
+  - DOMAIN-SUFFIX,futuhkapp.com
+  - DOMAIN-SUFFIX,futuhn.com
+  - DOMAIN-SUFFIX,futusg.com
+  - DOMAIN-SUFFIX,futuau.com
+  - DOMAIN-SUFFIX,futu0.com
+  - DOMAIN-SUFFIX,futu1.com
+  - DOMAIN-SUFFIX,futu2.com
+  - DOMAIN-SUFFIX,futu3.com
+  - DOMAIN-SUFFIX,futu4.com
+  - DOMAIN-SUFFIX,futu6.com
+  - DOMAIN-SUFFIX,futu7.com
+  - DOMAIN-SUFFIX,futu8.com
+  - DOMAIN-SUFFIX,futu9.com
+  - DOMAIN-SUFFIX,futu.link
+  - DOMAIN-SUFFIX,futustatic.com
+  - DOMAIN-SUFFIX,futuesop.com
+  - DOMAIN-SUFFIX,futufin.com
+  - DOMAIN-SUFFIX,fututrade.com
+  - DOMAIN-SUFFIX,fututrustee.com
+  - DOMAIN-SUFFIX,futuholdings.com
+  - DOMAIN-SUFFIX,futuinc.com
+  - DOMAIN-SUFFIX,futuoa.com
+  - DOMAIN-SUFFIX,futuchain.com
+  - DOMAIN-SUFFIX,futunited.com
+  - DOMAIN-SUFFIX,moomoo.com
+  - DOMAIN-SUFFIX,moomoo.com.hk
+  - DOMAIN-SUFFIX,moomooapp.com
+  - DOMAIN-SUFFIX,moomoobull.com
+  - DOMAIN-SUFFIX,moomooequity.com
+  - DOMAIN-SUFFIX,moomootrustee.com

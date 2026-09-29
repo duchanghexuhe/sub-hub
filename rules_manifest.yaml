@@ -47,7 +47,63 @@ rules:
       - claudeusercontent.com
     note: 显式钉死 Claude Code / claude.ai 相关端点（claudeusercontent.com 为 artifacts 内容域）；增删域名只改本文件
 
-  # ---- 2. Claude（上游）----
+  # ---- 2. 富途（自维护直连补丁）----
+  - name: futu-extra
+    category: 直连（自维护补丁）
+    source: builtin
+    clash_file: futu-extra.yaml
+    sr_file: futu-extra.list
+    policy: DIRECT
+    behavior: classical   # payload 为 DOMAIN-SUFFIX,x 行，behavior 须为 classical
+    domains:
+      - futu.cn
+      - futu.com
+      - futu5.com
+      - futubull.cn
+      - futuniuniu.com
+      - futunn.com
+      - futuhk.com
+      - futuhk1.com
+      - futuhk2.com
+      - futuhkapp.com
+      - futuhn.com
+      - futusg.com
+      - futuau.com
+      - futu0.com
+      - futu1.com
+      - futu2.com
+      - futu3.com
+      - futu4.com
+      - futu6.com
+      - futu7.com
+      - futu8.com
+      - futu9.com
+      - futu.link
+      - futustatic.com
+      - futuesop.com
+      - futufin.com
+      - fututrade.com
+      - fututrustee.com
+      - futuholdings.com
+      - futuinc.com
+      - futuoa.com
+      - futuchain.com
+      - futunited.com
+      - moomoo.com
+      - moomoo.com.hk
+      - moomooapp.com
+      - moomoobull.com
+      - moomooequity.com
+      - moomootrustee.com
+    ips: []   # 行情网关裸 IP 段（App 经 HTTPDNS 自解析直连第三方机房时，域名规则拦不住）。
+              # 漏网之鱼已改默认 DIRECT（2026-09-29），裸 IP 落 MATCH 即直连，本字段降级为
+              # 可选钉死层（防鱼组被手动切回 🚀 的场景）；取证法：mihomo connections API 或
+              # SR 连接页筛富途连接，按 IP-CIDR 填此处，例: - 103.40.13.0/24
+    note: 校准（2026-09-29 实测）：blackmatrix7 Global 规则集把富途系域名（futu5/futunn/futu0-9/
+      moomoo 等 30+ 域）显式推向代理，富途按境外 IP 发 15 分钟延迟行情；ChinaMax 亦无覆盖。
+      域名全集取自上游 Global 的 futu*/moomoo* 归类，转自维护直连，增删只改本文件
+
+  # ---- 3. Claude（上游）----
   - name: Claude
     category: Claude（上游）
     source: blackmatrix7
@@ -57,7 +113,7 @@ rules:
     policy: "🛑 Claude 专用"
     behavior: classical
 
-  # ---- 3. AI 单列 → 各自组 ----
+  # ---- 4. AI 单列 → 各自组 ----
   - name: OpenAI
     category: AI 单列
     source: blackmatrix7
@@ -120,7 +176,7 @@ rules:
       - cursor.sh
     note: 校准（2026-09-27 实测）：blackmatrix7 无 Cursor/CursorAI 规则集，转自维护内置基线
 
-  # ---- 4. AI 兜底（聚合）----
+  # ---- 5. AI 兜底（聚合）----
   - name: AI
     category: AI 兜底
     source: builtin
@@ -139,7 +195,29 @@ rules:
       - poe.com
     note: 校准（2026-09-27 实测）：blackmatrix7 无 AI 聚合目录，转自维护兜底清单（未被单列的 AI 服务）
 
-  # ---- 5. 社交 ----
+  # ---- 6. 社交 ----
+  - name: telegram-extra
+    category: 社交（自维护补丁）
+    source: builtin
+    clash_file: telegram-extra.yaml
+    sr_file: telegram-extra.list
+    policy: "📲 Telegram"
+    behavior: classical   # payload 为 IP-CIDR,x 行（DC 网段），mihomo behavior 须为 classical
+    ips:
+      - 91.108.0.0/16
+      - 149.154.160.0/20
+      - 5.28.192.0/18
+      - 109.239.140.0/24
+      - 139.59.210.98/32
+      - 196.55.216.167/32
+      - 2001:67c:4e8::/48
+      - 2001:b28:f23c::/47
+      - 2001:b28:f23f::/48
+      - 2a0a:f280::/29
+    note: 校准（2026-09-29 实测）：Telegram 媒体不走域名——客户端拿 DC 网段裸 IP 直连，
+      域名规则拦不住而落漏网之鱼，视频归属错乱；DC 段自上游 Telegram.list 提取钉死
+      （漏网之鱼已改默认直连，被墙的 TG DC 必须显式走 📲，此钉死层防上游桩化/回归）
+
   - name: Telegram
     category: 社交
     source: blackmatrix7
@@ -149,7 +227,18 @@ rules:
     policy: "📲 Telegram"
     behavior: classical
 
-  # ---- 6. 流媒体 → 对应 select 组 ----
+  - name: Twitter
+    category: 社交
+    source: blackmatrix7
+    upstream_file: Twitter
+    clash_file: Twitter.yaml
+    sr_file: Twitter.list
+    policy: "🚀 节点选择"    # 组清单无专属组：跟随节点选择（TikTok 同款）
+    behavior: classical
+    note: 校准（2026-09-29 实测）：x.com/twimg.com 虽已覆盖于 Global，但上游主文件有桩化
+      前科（Netflix/ChinaMax 同款问题），推特视频媒体 twimg 系显式归组，不赌 Global 完整性
+
+  # ---- 7. 流媒体 → 对应 select 组 ----
   - name: Netflix
     category: 流媒体
     source: blackmatrix7
@@ -206,7 +295,7 @@ rules:
     policy: "🚀 节点选择"
     behavior: classical
 
-  # ---- 7. 大厂 → 对应 select 组 ----
+  # ---- 8. 大厂 → 对应 select 组 ----
   - name: GitHub
     category: 大厂
     source: blackmatrix7
@@ -244,7 +333,7 @@ rules:
     policy: "🍎 苹果服务"
     behavior: classical
 
-  # ---- 8. 国际大类 → 节点选择 ----
+  # ---- 9. 国际大类 → 节点选择 ----
   - name: Global
     category: 国际大类
     source: blackmatrix7
@@ -266,7 +355,7 @@ rules:
     policy: "🚀 节点选择"
     behavior: classical
 
-  # ---- 9-10. 直连（Loyalsoldier txt payload，rulesync 转双格式缓存）----
+  # ---- 10-11. 直连（Loyalsoldier txt payload，rulesync 转双格式缓存）----
   - name: ChinaMax
     category: 直连
     source: blackmatrix7

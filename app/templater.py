@@ -453,9 +453,11 @@ def build_groups(nodes: list[Node], *, config: AppConfig,
     # 12. 🎮 游戏平台（默认 DIRECT）
     groups.append({"name": G_GAME, "type": "select",
                    "proxies": ["DIRECT", G_AUTO, G_MAIN, *region_names]})
-    # 13. 🐟 漏网之鱼（MATCH 落点）
+    # 13. 🐟 漏网之鱼（MATCH 落点）：默认 DIRECT——兜底语义「国内优先」（2026-09-29 实测
+    # 校准：富途行情裸 IP / 国内长尾落鱼走代理会被判境外发延迟行情；推特视频、TG 视频等
+    # 该代理流量由规则链显式归组，鱼组只收真正的长尾。可手动切 🚀 恢复全代理模式）
     groups.append({"name": G_FINAL, "type": "select",
-                   "proxies": [G_MAIN, G_AUTO, "DIRECT"]})
+                   "proxies": ["DIRECT", G_MAIN, G_AUTO]})
     return groups
 
 
@@ -530,26 +532,35 @@ def _read_cached_payload(entry: RuleEntry, config: AppConfig) -> list[str] | Non
     return None
 
 
-def _manifest_builtin_domains(rule_name: str) -> list[str]:
-    """从清单里取自维护条目的 domains（claude-extra 离线兜底）。"""
+def _manifest_builtin_payload(rule_name: str) -> list[str]:
+    """从清单里取自维护条目的 domains/ips，规范成 TYPE,value 行（离线兜底）。
+
+    mihomo classical inline payload 要求显式前缀（DOMAIN-SUFFIX,x），
+    裸域名行会坏掉整个 provider，这里不回退裸形态；IP-CIDR 行不带 no-resolve，
+    SR 端由 _payload_line_to_sr_rule 原样追加策略。增删条目只改 rules_manifest.yaml。
+    """
     try:
         doc = yaml.safe_load(DEFAULT_MANIFEST_PATH.read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError):
         return []
     for item in doc.get("rules") or []:
-        if str(item.get("name")) == rule_name and isinstance(item.get("domains"), list):
-            return [str(d).strip() for d in item["domains"] if str(d).strip()]
+        if str(item.get("name")) == rule_name:
+            domains = item.get("domains") if isinstance(item.get("domains"), list) else []
+            ips = item.get("ips") if isinstance(item.get("ips"), list) else []
+            lines = [f"DOMAIN-SUFFIX,{str(d).strip()}" for d in domains if str(d).strip()]
+            lines += [f"IP-CIDR,{str(i).strip()}" for i in ips if str(i).strip()]
+            return lines
     return []
 
 
 def _inline_payload(entry: RuleEntry, config: AppConfig) -> list[str]:
-    """离线版内联 payload：缓存 yaml → 缓存 .list → 清单内置 domains → 空（告警）。"""
+    """离线版内联 payload：缓存 yaml → 缓存 .list → 清单内置 domains/ips → 空（告警）。"""
     cached = _read_cached_payload(entry, config)
     if cached is not None:
         return cached
-    domains = _manifest_builtin_domains(entry.name)
-    if domains:
-        return domains
+    lines = _manifest_builtin_payload(entry.name)
+    if lines:
+        return lines
     logger.warning("离线内联缺少规则缓存，payload 为空：%s（请先运行规则镜像）", entry.name)
     return []
 

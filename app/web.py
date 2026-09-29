@@ -414,7 +414,7 @@ def _rules_state(config: AppConfig) -> dict[str, Any] | None:
 def _build_lifespan(config: AppConfig, store: Store) -> Callable[[FastAPI], Iterator[None]]:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> Iterator[None]:
-        # 启动同步放后台线程：全量上游拉取（26 条）可耗时数十秒，阻塞会推迟端口
+        # 启动同步放后台线程：全量上游拉取（29 条）可耗时数十秒，阻塞会推迟端口
         # 监听，违背「分发可用性 > 数据新鲜度」；基线已内置，期间客户端拉缓存/基线。
         threading.Thread(
             target=_startup_rulesync, args=(config,), name="subhub-startup-rulesync", daemon=True

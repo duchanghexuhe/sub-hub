@@ -44,8 +44,9 @@ DOCS_CLAUDE_DOMAINS = [
 
 # docs/02 §3 规则链顺序（manifest 列表顺序不得重排）
 EXPECTED_CHAIN = [
-    "claude-extra", "Claude", "OpenAI", "Gemini", "Copilot",
-    "Grok", "Perplexity", "CursorAI", "AI", "Telegram",
+    "claude-extra", "futu-extra", "Claude", "OpenAI", "Gemini", "Copilot",
+    "Grok", "Perplexity", "CursorAI", "AI",
+    "telegram-extra", "Telegram", "Twitter",
     "Netflix", "Disney", "YouTube", "Spotify", "TikTok", "PrimeVideo",
     "GitHub", "Google", "Microsoft", "Apple",
     "Global", "ProxyGFWlist", "ChinaMax", "CNCIDR", "Lan", "Download",
@@ -116,6 +117,20 @@ class TestClaudeExtraBaseline:
         # 同为 builtin 的自维护清单（基线缺失时按 domains 生成）
         grok_text = (config.rules_dir / "Grok.yaml").read_text(encoding="utf-8")
         assert "DOMAIN-SUFFIX,x.ai" in grok_text
+
+    def test_render_builtin_rule_with_ips(self):
+        """ips 混排：DOMAIN-SUFFIX 与 IP-CIDR 行共存（富途行情网关裸 IP 段场景）。"""
+        yaml_text, list_text = rulesync._render_builtin_rule(["a.com"], ["1.2.3.0/24"])
+        assert "  - DOMAIN-SUFFIX,a.com" in yaml_text
+        assert "  - IP-CIDR,1.2.3.0/24" in yaml_text
+        assert "IP-CIDR,1.2.3.0/24" in list_text
+        # SR 渲染按「含逗号行原样拼策略」处理，IP 行不得带 no-resolve（否则策略错位）
+        assert "no-resolve" not in list_text
+
+    def test_builtin_content_ips_only_entry(self):
+        """仅 ips（无 domains）的条目也能生成，且走「基线优先」之外的下级分支。"""
+        content = rulesync._builtin_content("no-such-rule.list", [], ["5.6.7.0/24"])
+        assert content is not None and b"IP-CIDR,5.6.7.0/24" in content
 
 
 # ---------------------------------------------------------------- 失败路径：沿用旧缓存 / 基线兜底
