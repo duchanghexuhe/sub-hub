@@ -181,10 +181,14 @@ def _push(
         return result
 
     logger.info("开始镜像推送：提供方 %s，产物版本 v%04d，文件 %d 份", provider, version, len(artifacts))
-    if provider == "cf-kv":
-        urls = _push_cf_kv(settings, artifacts, transport)
-    else:
-        urls = _push_github(config, settings, artifacts, transport)
+    try:
+        urls = _push_once(config, settings, artifacts, transport, trust_env=True)
+    except httpx.TransportError as exc:
+        # 只对连接层失败换路重试：API 层错误（403/写被拒）换路也无解。代理优先是因为
+        # CF API 的 IPv4 DNS 污染期直连必败；直连兜底覆盖 Clash 未开/出口全灭而污染
+        # 恰处间歇的窗口。两路皆断属物理现实，异常交 push_current 兜底吞掉。
+        logger.warning("镜像推送经代理失败（%s: %s），改直连重试", type(exc).__name__, exc)
+        urls = _push_once(config, settings, artifacts, transport, trust_env=False)
 
     pushed_at = now_iso()
     settings["last_push"] = {
@@ -248,10 +252,29 @@ def _collect_artifacts(config: AppConfig, version: int) -> dict[str, bytes]:
 
 # ------------------------------------------------------------------ 提供方：cf-kv
 
+def _push_once(
+    config: AppConfig,
+    settings: dict[str, Any],
+    artifacts: dict[str, bytes],
+    transport: httpx.BaseTransport | None,
+    *,
+    trust_env: bool,
+) -> dict[str, str]:
+    """按 provider 完整推送一轮；trust_env=False 时无视环境代理变量直连。
+
+    每轮从第一份文件重推：KV/Contents 写入是幂等 PUT，前一轮半途而废不影响结果。
+    """
+    if settings.get("provider") == "cf-kv":
+        return _push_cf_kv(settings, artifacts, transport, trust_env=trust_env)
+    return _push_github(config, settings, artifacts, transport, trust_env=trust_env)
+
+
 def _push_cf_kv(
     settings: dict[str, Any],
     artifacts: dict[str, bytes],
     transport: httpx.BaseTransport | None,
+    *,
+    trust_env: bool = True,
 ) -> dict[str, str]:
     """经 Cloudflare API v4 写 Workers KV：key = <url_token>/<文件名>。"""
     cf = settings.get("cf_kv") or {}
@@ -269,7 +292,8 @@ def _push_cf_kv(
     )
     headers = {"Authorization": f"Bearer {api_token}"}
     urls: dict[str, str] = {}
-    with httpx.Client(transport=transport, headers=headers, timeout=_PUSH_TIMEOUT) as client:
+    with httpx.Client(transport=transport, headers=headers, timeout=_PUSH_TIMEOUT,
+                      trust_env=trust_env) as client:
         for name, data in artifacts.items():
             key = f"{url_token}/{name}"
             resp = client.put(f"{values_base}/{quote(key, safe='')}", content=data)
@@ -292,6 +316,8 @@ def _push_github(
     settings: dict[str, Any],
     artifacts: dict[str, bytes],
     transport: httpx.BaseTransport | None,
+    *,
+    trust_env: bool = True,
 ) -> dict[str, str]:
     """经 Contents API 上传到公开仓库随机路径，客户端拉 raw 链接（须代理）。"""
     gh = settings.setdefault("github", {})
@@ -316,7 +342,8 @@ def _push_github(
         "X-GitHub-Api-Version": "2022-11-28",
     }
     urls: dict[str, str] = {}
-    with httpx.Client(transport=transport, headers=headers, timeout=_PUSH_TIMEOUT) as client:
+    with httpx.Client(transport=transport, headers=headers, timeout=_PUSH_TIMEOUT,
+                      trust_env=trust_env) as client:
         for name, data in artifacts.items():
             remote_path = f"{path}/{name}"
             existing = client.get(f"{contents_base}/{remote_path}", params={"ref": branch})

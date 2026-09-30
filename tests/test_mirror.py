@@ -252,6 +252,25 @@ def test_push_never_raises_on_transport_exception(config):
     assert (config.out_dir / "v0001" / "clash.yaml").is_file()
 
 
+def test_push_falls_back_to_direct_when_connect_fails(config):
+    """连接层失败（Clash 未开/出口全灭）换直连重试一轮，而不是一票否决。"""
+    _publish_artifacts(config)
+    _enable(config)
+    calls = {"n": 0}
+
+    class FlakyTransport(httpx.BaseTransport):
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise httpx.ConnectError("代理拒绝连接")
+            return httpx.Response(200, json={"success": True, "errors": [], "result": {"id": "x"}})
+
+    result = mirror.push_current(config, transport=FlakyTransport())
+    assert result.ok is True
+    assert result.error is None
+    assert calls["n"] == 3          # 代理轮在首个文件断掉 + 直连轮补推两份
+
+
 def test_status_reports_last_push_without_credentials(config):
     _publish_artifacts(config)
     _enable(config)
