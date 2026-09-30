@@ -205,9 +205,20 @@ class Harness:
             lines.append("FINAL,🚀 节点选择")
             return "\n".join(lines) + "\n"
 
+        def render_sr_yaml(nodes, *, config, rules, purity=None, stability=None):
+            if harness.render_garbage:
+                return "proxies: [未闭合"
+            names = [n.name for n in nodes] or ["DIRECT"]
+            doc = {
+                "proxies": [n.to_clash_proxy() for n in nodes],
+                "proxy-groups": [{"name": "🚀 节点选择", "type": "select", "proxies": names}],
+                "rules": ["MATCH,🚀 节点选择"],
+            }
+            return yaml.safe_dump(doc, allow_unicode=True, sort_keys=False)
+
         self._module("templater", load_rules_manifest=load_rules_manifest,
                      build_groups=build_groups, render_clash=render_clash,
-                     render_sr_conf=render_sr_conf)
+                     render_sr_conf=render_sr_conf, render_sr_yaml=render_sr_yaml)
 
     def _install_validator(self) -> None:
         harness = self
@@ -230,6 +241,15 @@ class Harness:
             return [f"conf 缺少 {s} 段" for s in ("[Proxy]", "[Proxy Group]", "[Rule]")
                     if s not in text]
 
+        def validate_sr_yaml(text: str) -> list[str]:
+            try:
+                doc = yaml.safe_load(text) or {}
+            except yaml.YAMLError:
+                return ["SR YAML 无法回读"]
+            if not doc.get("proxies") or not doc.get("rules"):
+                return ["SR YAML 缺少 proxies/rules"]
+            return []
+
         def check_consistency(clash_text: str, sr_text: str) -> list[str]:
             try:
                 groups = (yaml.safe_load(clash_text) or {}).get("proxy-groups", [])
@@ -245,6 +265,7 @@ class Harness:
             errors: list[str] = []
             errors += validate_clash_yaml(artifacts["clash.yaml"])
             errors += validate_sr_conf(artifacts["shadowrocket.conf"])
+            errors += validate_sr_yaml(artifacts["shadowrocket.yaml"])
             errors += validate_clash_yaml(artifacts["clash-offline.yaml"])
             errors += validate_sr_conf(artifacts["shadowrocket-offline.conf"])
             errors += check_consistency(artifacts["clash.yaml"], artifacts["shadowrocket.conf"])
@@ -287,6 +308,7 @@ class Harness:
         self._module("validator", PublishError=PublishError,
                      validate_clash_yaml=validate_clash_yaml,
                      validate_sr_conf=validate_sr_conf,
+                     validate_sr_yaml=validate_sr_yaml,
                      check_consistency=check_consistency, publish=publish)
 
     def _install_mirror(self) -> None:

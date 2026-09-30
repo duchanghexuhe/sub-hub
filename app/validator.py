@@ -1,10 +1,11 @@
 """双格式产物校验与发布（data/out/ 的唯一写入入口）。
 
 职责（docs/INTERFACES.md §3.5）：
-- validate_clash_yaml / validate_sr_conf：解析回读单份产物，检查结构合法性；
+- validate_clash_yaml / validate_sr_conf / validate_sr_yaml：解析回读单份产物，
+  检查结构合法性（SR YAML 产物从严：禁 rule-providers 外链与 mihomo 运行项）；
 - check_consistency：回读两份主产物，校验组数、组名集合、规则条目（name+policy 序列）
   等价——不等价返回差异描述列表，pipeline 据此拒绝发布并回滚上一版；
-- publish：4 份产物各自校验 → 主两份一致性校验 → 任一失败抛 PublishError →
+- publish：5 份产物各自校验 → 主两份一致性校验 → 任一失败抛 PublishError →
   原子写入新版本目录（meta.json 最后写，作为发布点）→ 清理旧版本。
 
 安全纪律：日志只输出版本号、计数与 hash 前缀，不打印订阅 URL 与节点凭据。
@@ -34,10 +35,11 @@ from app.utils import (
 
 logger = logging.getLogger("subhub.validator")
 
-# artifacts 键固定为这四个（docs/INTERFACES.md §3.5），顺序即 content_hash 拼接顺序
+# artifacts 键固定为这五个（docs/INTERFACES.md §3.5），顺序即 content_hash 拼接顺序
 ARTIFACT_KEYS: tuple[str, ...] = (
     "clash.yaml",
     "shadowrocket.conf",
+    "shadowrocket.yaml",
     "clash-offline.yaml",
     "shadowrocket-offline.conf",
 )
@@ -364,6 +366,62 @@ def validate_sr_conf(text: str) -> list[str]:
     return errors
 
 
+def validate_sr_yaml(text: str) -> list[str]:
+    """SR 专用 YAML（Clash 兼容格式）校验：proxies/groups/rules 三键齐全、
+    规则全内联（不得含 rule-providers / RULE-SET 外链）、vless REALITY 参数保留。
+
+    SR 对该格式的解析面有限，这里从严：发现任何它可能静默丢弃的要素即报错，
+    宁可拦截发布也不让客户端拿到缺参数的节点。
+    """
+    errors: list[str] = []
+    try:
+        doc = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        return [f"SR YAML 不是合法 YAML：{exc}"]
+    if not isinstance(doc, dict):
+        return ["SR YAML 顶层必须是映射"]
+
+    proxies = doc.get("proxies")
+    if not isinstance(proxies, list) or not proxies:
+        return ["SR YAML 缺少 proxies 列表"]
+    groups = doc.get("proxy-groups")
+    if not isinstance(groups, list) or not groups:
+        errors.append("SR YAML 缺少 proxy-groups 列表")
+    rules = doc.get("rules")
+    if not isinstance(rules, list) or not rules:
+        errors.append("SR YAML 缺少 rules 列表")
+
+    if "rule-providers" in doc:
+        errors.append("SR YAML 不得包含 rule-providers（规则须全内联，外链 SR 拉不到）")
+    for key in ("mixed-port", "external-controller", "dns", "sniffer"):
+        # 这些是 mihomo 运行项，SR 导入路径不需要也不消费；带上无害但容易
+        # 让人误以为 SR 会执行同等行为（如 fake-ip/嗅探），干脆禁止。
+        if key in doc:
+            errors.append(f"SR YAML 不应包含 mihomo 运行项 {key}")
+
+    reality_nodes = 0
+    for p in proxies:
+        if not isinstance(p, dict):
+            errors.append("SR YAML proxies 项必须是映射")
+            continue
+        if p.get("type") == "vless" and isinstance(p.get("reality-opts"), dict):
+            reality_nodes += 1
+            if not p["reality-opts"].get("public-key"):
+                errors.append(f"vless 节点 {p.get('name')} 的 reality-opts 缺 public-key")
+    if "rule-providers" not in doc:
+        for r in rules or []:
+            if isinstance(r, str) and r.startswith("RULE-SET,"):
+                errors.append(f"SR YAML 规则不得使用 RULE-SET 外链：{r[:60]}")
+                break
+
+    if not errors and isinstance(rules, list) and rules:
+        last = str(rules[-1])
+        if not last.startswith("MATCH,"):
+            errors.append(f"SR YAML 最后一条规则必须是 MATCH（当前：{last[:40]}）")
+
+    return errors
+
+
 # ---------------------------------------------------------------- 一致性校验
 
 def _clash_rule_seq(doc: dict[str, Any]) -> list[tuple[str, str]]:
@@ -507,9 +565,9 @@ def _diff_summary(prev_meta: dict[str, Any] | None,
 
 def publish(config: AppConfig, store: Store, artifacts: dict[str, str],
             nodes: list[Node], *, note: str | None = None) -> ConfigVersion:
-    """校验并发布四份产物到 data/out/v<NNNN>/（pipeline 的发布唯一入口）。
+    """校验并发布五份产物到 data/out/v<NNNN>/（pipeline 的发布唯一入口）。
 
-    流程：4 份各自 validate_* → check_consistency(主两份) → 任一失败抛 PublishError
+    流程：5 份各自 validate_* → check_consistency(主两份) → 任一失败抛 PublishError
     → 原子写入新版本目录 + meta.json（最后写，作为发布点）→ prune(keep=5)。
     """
     _ = store  # 契约签名保留（发布事件暂不落库）
@@ -529,6 +587,7 @@ def publish(config: AppConfig, store: Store, artifacts: dict[str, str],
         "clash-offline.yaml": validate_clash_yaml,
         "shadowrocket.conf": validate_sr_conf,
         "shadowrocket-offline.conf": validate_sr_conf,
+        "shadowrocket.yaml": validate_sr_yaml,
     }
     for key, validate in validators.items():
         problems = validate(artifacts[key])

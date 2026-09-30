@@ -13,6 +13,9 @@ services:
       SUBHUB_HOST: 0.0.0.0
       SUBHUB_PORT: 8399
       SUBHUB_NAS_HOST: 192.168.31.10   # 构造分发链接用
+      # 容器默认 UTC 而代码全用 datetime.now()：不设 TZ 时落库时间戳与每日
+      # 纯净度扫描时刻都比北京时间早 8 小时。镜像内已带 tzdata。
+      TZ: Asia/Shanghai
       # 规则上游（raw.githubusercontent.com）直连失败时的回落代理（Windows 主机 Clash，
       # 与 NAS dockerd 同一代理惯例）；仅作用于规则镜像，机场订阅始终直连。
       # Clash 关闭时规则自动回落内置基线/缓存，分发与发布链路不受影响。

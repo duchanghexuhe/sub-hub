@@ -124,11 +124,12 @@ def _fake_mirror() -> tuple[SimpleNamespace, dict[str, int]]:
 
 
 def _publish(config, version: int, *, node_count: int = 12, clash: str | None = None) -> str:
-    """模拟 validator.publish 的落盘形态（4 份产物 + meta.json）。"""
+    """模拟 validator.publish 的落盘形态（5 份产物 + meta.json）。"""
     d = new_version_dir(config.out_dir, version)
     clash_text = clash if clash is not None else f"# clash config v{version}\n"
     atomic_write_text(d / "clash.yaml", clash_text)
     atomic_write_text(d / "shadowrocket.conf", f"# sr config v{version}\n")
+    atomic_write_text(d / "shadowrocket.yaml", f"proxies:\n# sr yaml v{version}\n")
     atomic_write_text(d / "clash-offline.yaml", f"# offline clash v{version}\n")
     atomic_write_text(d / "shadowrocket-offline.conf", f"# offline sr v{version}\n")
     write_json(d / "meta.json", {
@@ -503,7 +504,7 @@ class TestConfig:
         assert r1.status_code == 200 and r2.status_code == 200
         assert "text/plain" in r1.headers["content-type"]
         assert r1.text.startswith("# clash config v1")
-        assert r2.text.startswith("# sr config v1")
+        assert "sr yaml v1" in r2.text
 
     def test_versions_timeline(self, config, client):
         _publish(config, 1, node_count=12)

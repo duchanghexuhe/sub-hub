@@ -44,11 +44,15 @@ PROVIDERS: tuple[str, ...] = ("cf-kv", "github")
 ARTIFACT_ORDER: tuple[str, ...] = (
     "clash.yaml",
     "shadowrocket.conf",
+    "shadowrocket.yaml",
     "clash-offline.yaml",
     "shadowrocket-offline.conf",
 )
 
 _CF_API_BASE = "https://api.cloudflare.com/client/v4"
+# 推送超时：产物含多份 MB 级离线包/SR YAML，NAS→CF 国际链路上行慢，
+# 30s 会把大文件上传顶穿（ReadTimeout）；给足写超时 + 一次重试。
+_PUSH_TIMEOUT = httpx.Timeout(connect=15.0, read=180.0, write=180.0, pool=30.0)
 _GITHUB_API_BASE = "https://api.github.com"
 
 
@@ -265,7 +269,7 @@ def _push_cf_kv(
     )
     headers = {"Authorization": f"Bearer {api_token}"}
     urls: dict[str, str] = {}
-    with httpx.Client(transport=transport, headers=headers, timeout=30.0) as client:
+    with httpx.Client(transport=transport, headers=headers, timeout=_PUSH_TIMEOUT) as client:
         for name, data in artifacts.items():
             key = f"{url_token}/{name}"
             resp = client.put(f"{values_base}/{quote(key, safe='')}", content=data)
@@ -312,7 +316,7 @@ def _push_github(
         "X-GitHub-Api-Version": "2022-11-28",
     }
     urls: dict[str, str] = {}
-    with httpx.Client(transport=transport, headers=headers, timeout=30.0) as client:
+    with httpx.Client(transport=transport, headers=headers, timeout=_PUSH_TIMEOUT) as client:
         for name, data in artifacts.items():
             remote_path = f"{path}/{name}"
             existing = client.get(f"{contents_base}/{remote_path}", params={"ref": branch})

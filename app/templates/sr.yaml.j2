@@ -1,0 +1,19 @@
+# ==============================================================
+# sub-hub 自动生成 · SR 专用配置（Clash 兼容格式）· {{ variant_label }}
+# 请勿手工编辑：订阅刷新后整份覆盖
+# 节点 {{ node_count }} 个 · 分组 {{ group_count }} 个 · anytls 跳过 {{ skipped_anytls }} 个
+# 说明：SR 原生 conf 无法表达 VLESS REALITY（公钥/短 ID 参数被解析器丢弃），
+#       故本产物改走 SR 的 Clash 兼容导入路径；规则全部内联，无任何外链，
+#       家里/外网导入同一份即可用。
+# ==============================================================
+proxies:
+{% for block in proxy_blocks %}{{ block }}
+{% endfor %}
+
+proxy-groups:
+{% for block in group_blocks %}{{ block }}
+{% endfor %}
+
+rules:
+{% for line in rule_lines %}  - {{ line }}
+{% endfor %}

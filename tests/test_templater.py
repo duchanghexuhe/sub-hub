@@ -159,6 +159,7 @@ def _artifacts(result: RenderResult) -> dict[str, str]:
     return {
         "clash.yaml": result.clash_yaml,
         "shadowrocket.conf": result.sr_conf,
+        "shadowrocket.yaml": result.sr_yaml,
         "clash-offline.yaml": result.clash_offline_yaml,
         "shadowrocket-offline.conf": result.sr_offline_conf,
     }
@@ -618,6 +619,13 @@ def test_sr_proxy_direct_mapping(rendered: RenderResult, config: AppConfig):
     assert " = vless, us-lax-01.example-airport-a.com, 443, " in vless
     assert "username=11111111-1111-4111-8111-111111111101" in vless
     assert "tls=true" in vless and "flow=xtls-rprx-vision" in vless
+    # REALITY 握手必需参数（两套方言都输出）；缺公钥的 vless 在 SR 必然超时
+    assert "reality-public-key=pbk-us-lax-test" in vless
+    assert "reality-short-id=0123abcd" in vless
+    assert "public-key=pbk-us-lax-test" in vless and "short-id=0123abcd" in vless
+    # 无 reality-opts 的 vless 不得出现空值参数
+    plain = next(line for line in proxy_lines if "DMIT 高防机房 01 =" in line)
+    assert "public-key" not in plain and "reality-" not in plain
     ss_line = next(line for line in proxy_lines if "韩国 首尔 01 =" in line)
     assert " = ss, kr-01.example-airport-a.com, 8388, " in ss_line
     assert "encrypt-method=aes-256-gcm" in ss_line and "password=" in ss_line
@@ -625,6 +633,31 @@ def test_sr_proxy_direct_mapping(rendered: RenderResult, config: AppConfig):
     assert "ws=true" in ws_line and "ws-path=/ws" in ws_line and "ws-headers=Host:" in ws_line
     assert not any(" = anytls," in line for line in proxy_lines)  # anytls 已按开关跳过
     assert "anytls 跳过 2 个" in rendered.sr_conf
+
+
+def test_sr_yaml_preserves_reality_and_inlines_rules(rendered: RenderResult, config: AppConfig):
+    """SR YAML 产物：reality-opts 原样保留（conf 方言丢参数的根治方案）、规则全内联。"""
+    import yaml as _yaml
+    doc = _yaml.safe_load(rendered.sr_yaml)
+    assert isinstance(doc, dict)
+    vless = next(p for p in doc["proxies"]
+                 if p["name"] == "🇺🇸 美国 洛杉矶 家庭宽带 01")
+    assert vless["type"] == "vless"
+    assert vless["reality-opts"] == {"public-key": "pbk-us-lax-test",
+                                     "short-id": "0123abcd"}
+    assert vless["flow"] == "xtls-rprx-vision"
+    # 禁外链与 mihomo 运行项：单文件自包含，SR 导入即用
+    assert "rule-providers" not in doc
+    for key in ("mixed-port", "external-controller", "dns", "sniffer"):
+        assert key not in doc
+    assert not [r for r in doc["rules"] if str(r).startswith("RULE-SET,")]
+    assert str(doc["rules"][-1]).startswith("MATCH,")
+    # 分组集合与 mihomo 主版本一致
+    main = _yaml.safe_load(rendered.clash_yaml)
+    assert [g["name"] for g in doc["proxy-groups"]] == \
+        [g["name"] for g in main["proxy-groups"]]
+    # anytls 同口径跳过
+    assert not [p for p in doc["proxies"] if p["type"] == "anytls"]
 
 
 def test_sr_includes_anytls_when_switch_off(nodes: list[Node], config: AppConfig, rules):

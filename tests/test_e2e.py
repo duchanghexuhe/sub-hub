@@ -79,6 +79,7 @@ EXPECTED_GROUPS = {
 ARTIFACT_NAMES = (
     "clash.yaml",
     "shadowrocket.conf",
+    "shadowrocket.yaml",
     "clash-offline.yaml",
     "shadowrocket-offline.conf",
 )

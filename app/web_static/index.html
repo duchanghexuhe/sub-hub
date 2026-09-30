@@ -223,7 +223,7 @@ section h2{flex-wrap:wrap}
   <div id="sub-links"></div>
   <div class="tabs">
     <button data-fmt="clash" class="on">mihomo YAML 预览</button>
-    <button data-fmt="sr">SR conf 预览</button>
+    <button data-fmt="sr">SR yaml 预览</button>
   </div>
   <pre class="preview" id="config-preview">（尚未发布）</pre>
   <h2 style="margin-top:14px">版本时间线 <span class="hint">保留最近 5 版，可一键回退</span></h2>
@@ -365,6 +365,22 @@ function toast(msg, err){
   box.textContent = msg;
   $("#toast").appendChild(box);
   setTimeout(() => box.remove(), 6000);
+}
+// 非安全上下文（如 http://NAS-IP:8399）下 navigator.clipboard 为 undefined，
+// writeText 会同步抛错，必须走 textarea + execCommand 兜底
+async function copyText(text){
+  if(window.isSecureContext && navigator.clipboard){
+    try{ await navigator.clipboard.writeText(text); return true; }catch(e){}
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none";
+  document.body.appendChild(ta);
+  ta.focus(); ta.select(); ta.setSelectionRange(0, text.length);
+  let ok = false;
+  try{ ok = document.execCommand("copy"); }catch(e){}
+  ta.remove();
+  return ok;
 }
 async function api(path, opts = {}){
   const init = {headers: {}, ...opts};
@@ -656,9 +672,9 @@ async function loadConfig(){
   // 订阅链接复制
   const links = [
     ["Clash Verge（mihomo）", BOOT.subUrls && BOOT.subUrls.clash],
-    ["SR", BOOT.subUrls && BOOT.subUrls.sr],
+    ["SR（推荐，yaml）", BOOT.subUrls && BOOT.subUrls.sr],
+    ["SR 离线包（conf）", BOOT.subUrls && BOOT.subUrls.srOffline],
     ["clash 离线包", BOOT.subUrls && BOOT.subUrls.clashOffline],
-    ["SR 离线包", BOOT.subUrls && BOOT.subUrls.srOffline],
   ];
   $("#sub-links").innerHTML = "";
   for(const [label, url] of links){
@@ -667,8 +683,9 @@ async function loadConfig(){
     row.className = "linkrow";
     row.innerHTML = `<span class="muted" style="width:150px">${esc(label)}</span><input readonly value="${esc(url)}"><button class="copy">复制</button>`;
     row.querySelector("input").addEventListener("focus", e => e.target.select());
-    row.querySelector("button").addEventListener("click", () => {
-      navigator.clipboard.writeText(url).then(() => toast("链接已复制"), () => { row.querySelector("input").select(); document.execCommand("copy"); toast("链接已复制"); });
+    row.querySelector("button").addEventListener("click", async () => {
+      if(await copyText(url)) toast("链接已复制");
+      else { row.querySelector("input").select(); toast("复制失败，请选中后按 Ctrl+C", true); }
     });
     $("#sub-links").appendChild(row);
   }
@@ -776,7 +793,8 @@ async function loadMirror(){
     const mirrorUrls = (s.last_push && s.last_push.urls) || s.urls || {};
     const mirrorLabels = [
       ["clash.yaml", "Clash Verge（mihomo）"],
-      ["shadowrocket.conf", "Shadowrocket"],
+      ["shadowrocket.yaml", "SR（推荐）"],
+      ["shadowrocket.conf", "SR conf（旧）"],
       ["clash-offline.yaml", "clash 离线包"],
       ["shadowrocket-offline.conf", "SR 离线包"],
     ];
@@ -789,8 +807,9 @@ async function loadMirror(){
         row.className = "linkrow";
         row.innerHTML = `<span class="muted" style="width:150px">${esc(label)}</span><input readonly value="${esc(url)}"><button class="copy">复制</button>`;
         row.querySelector("input").addEventListener("focus", e => e.target.select());
-        row.querySelector("button").addEventListener("click", () => {
-          navigator.clipboard.writeText(url).then(() => toast("链接已复制"), () => { row.querySelector("input").select(); document.execCommand("copy"); toast("链接已复制"); });
+        row.querySelector("button").addEventListener("click", async () => {
+          if(await copyText(url)) toast("链接已复制");
+          else { row.querySelector("input").select(); toast("复制失败，请选中后按 Ctrl+C", true); }
         });
         linksBox.appendChild(row);
       }

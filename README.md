@@ -101,7 +101,7 @@ curl http://127.0.0.1:8399/api/health
 | 客户端 | 订阅链接 | 说明 |
 | --- | --- | --- |
 | Clash Verge（Windows 本机） | `http://<nas>:8399/sub/<token>/clash.yaml` | mihomo 主版本；导入后代理页确认组齐全，手动锁定一次 Claude 节点 |
-| Shadowrocket（iOS，≥6.3） | `http://<nas>:8399/sub/<token>/shadowrocket.conf` | SR 主版本；anytls 需 6.3+，低版本已按开关自动跳过该类节点 |
+| Shadowrocket（iOS，≥6.3） | `http://<nas>:8399/sub/<token>/shadowrocket.yaml` | SR 主版本（Clash 兼容格式，规则全内联；原生 conf 无法表达 VLESS REALITY 已弃为主推）；anytls 需 6.3+，低版本已按开关自动跳过该类节点 |
 | 离线自包含版（外网兜底） | `…/clash-offline.yaml`、`…/shadowrocket-offline.conf` | 规则全内联，本地导入后脱离 NAS 运行 |
 
 规则集分发：`http://<nas>:8399/rules/<name>.yaml|.list`（配置内 RULE-SET 已自动指向）。

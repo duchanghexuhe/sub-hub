@@ -290,10 +290,10 @@ def check_consistency(clash_text: str, sr_text: str) -> list[str]
 def publish(config: AppConfig, store: Store, artifacts: dict[str, str],
             nodes: list[Node], *, note: str | None = None) -> ConfigVersion
     # artifacts 键固定为：
-    #   "clash.yaml" | "shadowrocket.conf" | "clash-offline.yaml" | "shadowrocket-offline.conf"
-    # 流程：4 份各自 validate_* → check_consistency(主两份) → 任一失败抛 PublishError(list[str])
-    #   → new_version_dir(next_version) 原子写入 4 份 + meta.json（ConfigVersion 序列化）
-    #   → content_hash = sha256(4 份按序拼接) → prune_versions(keep=5) → 返回 ConfigVersion
+    #   "clash.yaml" | "shadowrocket.conf" | "shadowrocket.yaml" | "clash-offline.yaml" | "shadowrocket-offline.conf"
+    # 流程：5 份各自 validate_* → check_consistency(主两份) → 任一失败抛 PublishError(list[str])
+    #   → new_version_dir(next_version) 原子写入 5 份 + meta.json（ConfigVersion 序列化）
+    #   → content_hash = sha256(5 份按序拼接) → prune_versions(keep=5) → 返回 ConfigVersion
 
 class PublishError(Exception):
     def __init__(self, errors: list[str]) -> None: ...   # .errors 属性
@@ -389,13 +389,13 @@ class PipelineResult:
 def run_full_pipeline(config: AppConfig, store: Store, *,
                       sub_id: int | None = None) -> PipelineResult
     # 完整链路：抓取（sub_id=None 全部启用订阅）→ parser → 合并 → cleaner.clean
-    # → store.replace_nodes（每订阅，含被滤节点）→ templater 渲染 4 份
+    # → store.replace_nodes（每订阅，含被滤节点）→ templater 渲染 5 份
     # → validator.publish（0 有效节点时拒绝发布，PipelineResult.published=False）
     # → 新节点增量纯净度扫描钩子（try/except 包裹，失败不影响发布）
     # → mirror 已开启则 push_current（同样吞异常）
 
 def rollback_to_version(config: AppConfig, store: Store, version: int) -> ConfigVersion
-    # 把 data/out/v<version>/4 份产物复制为新版本目录（meta.note="回退到 v<version>"）
+    # 把 data/out/v<version>/5 份产物复制为新版本目录（meta.note="回退到 v<version>"）
 ```
 
 ### 3.10 web — `app/web.py` + `app/main.py`（装配）
@@ -418,7 +418,7 @@ def create_app(config: AppConfig | None = None, store: Store | None = None) -> F
 | `GET /api/nodes` | `?region=&tag=&sub_id=`；含属性、纯净度摘要、被滤原因 |
 | `GET /api/purity/report`、`POST /api/purity/scan` | 报告按 Claude 适配度排序；attribute_changes 标红 |
 | `GET /api/config/preview?fmt=clash\|sr`、`POST /api/config/rollback` | preview 纯文本；rollback → pipeline.rollback_to_version |
-| `GET /sub/{token}/clash.yaml\|shadowrocket.conf\|clash-offline.yaml\|shadowrocket-offline.conf` | token 校验；附 `subscription-userinfo` 头（各启用订阅 userinfo 汇总）；ETag=content_hash，304 支持；故障返回上一版产物 |
+| `GET /sub/{token}/clash.yaml\|shadowrocket.conf\|shadowrocket.yaml\|clash-offline.yaml\|shadowrocket-offline.conf` | token 校验；附 `subscription-userinfo` 头（各启用订阅 userinfo 汇总）；ETag=content_hash，304 支持；故障返回上一版产物 |
 | `GET /rules/{file}` | data/rules/ 缓存（.yaml/.list），防目录穿越 |
 | `GET/POST /api/mirror`、`POST /api/mirror/push` | mirror.json 读写 + push_current |
 | `?qr` 任意分发端点 | 返回二维码扫码页（qrcode 库） |
@@ -476,7 +476,7 @@ data/
 ├── token                  config 首次生成（32 hex）
 ├── cache/<sub>-<ts>.yaml  fetcher 写（每订阅留 3 份），parser 不读（内存直传）
 ├── out/v<NNNN>/           validator.publish 独占写；web 分发端点与回退读
-│   ├── clash.yaml  shadowrocket.conf  clash-offline.yaml  shadowrocket-offline.conf
+│   ├── clash.yaml  shadowrocket.conf  shadowrocket.yaml  clash-offline.yaml  shadowrocket-offline.conf
 │   └── meta.json          ConfigVersion 序列化（validator 写，web/pipeline 读）
 ├── rules/<name>.yaml|.list  rulesync 写；web GET /rules/{file} 读；templater 离线内联读
 ├── rules/state.json       rulesync 写；web 读

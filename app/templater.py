@@ -14,7 +14,7 @@ docs/02 §2~§5 的实现：
   的摘要 dict 列表，可为空）：窗口内连续失败判死的节点从 url-test 自动选路组
   剔除（组空回退原成员），Claude 组同评分内存活优先、判死沉底——
   采样数据自动驱动策略，无需人工挑选；
-- render_all() 便捷入口：一次产出四份产物文本与统计（组数/节点数/SR 跳过 anytls 数）。
+- render_all() 便捷入口：一次产出五份产物文本与统计（组数/节点数/SR 跳过 anytls 数）。
 
 安全纪律：日志只输出计数、组名与节点名，绝不打印订阅 URL 与节点凭据字段。
 产物内容确定性强（不含时间戳），同一节点集重复渲染结果一致。
@@ -175,10 +175,11 @@ class RenderStats:
 
 @dataclass
 class RenderResult:
-    """四份产物文本 + 统计。"""
+    """五份产物文本 + 统计。"""
 
     clash_yaml: str                     # mihomo 主版本
-    sr_conf: str                        # SR 主版本
+    sr_conf: str                        # SR 主版本（原生 conf，legacy）
+    sr_yaml: str                        # SR 专用 YAML（Clash 兼容格式，推荐）
     clash_offline_yaml: str             # mihomo 离线自包含版
     sr_offline_conf: str                # SR 离线自包含版
     stats: RenderStats
@@ -587,6 +588,41 @@ def _sr_rule_lines(rules: list[RuleEntry], config: AppConfig, *, offline: bool) 
     return lines
 
 
+def _sr_yaml_rule_lines(rules: list[RuleEntry], config: AppConfig) -> list[str]:
+    """SR YAML 产物的 rules 列表：与离线版同源展开，仅落尾 FINAL 改为 clash 的 MATCH。"""
+    lines = _sr_rule_lines(rules, config, offline=True)
+    if lines and lines[-1] == f"FINAL,{G_FINAL}":
+        lines[-1] = f"MATCH,{G_FINAL}"
+    return lines
+
+
+def render_sr_yaml(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
+                   purity: list[PurityResult] | None = None,
+                   stability: list[dict] | None = None) -> str:
+    """渲染 SR 专用 YAML（Clash 兼容格式，规则全内联）。
+
+    SR 原生 conf 无法表达 VLESS REALITY（公钥/短 ID 参数被解析器静默丢弃），
+    改走其 Clash 配置导入路径：proxies 的 reality-opts 原样保留；规则内联
+    展开（不用 rule-providers），单文件无外链，家中/外网导入同一份即可用。
+    节点集与 conf 同口径（anytls 按开关跳过）。
+    """
+    real = _real_nodes(nodes)
+    sr_nodes, skipped_anytls, _ = _prepare_sr_nodes(real, config)
+    groups = build_groups(sr_nodes, config=config, purity=purity, stability=stability,
+                          region_presence_nodes=real)
+    template = _env.get_template("sr.yaml.j2")
+    return template.render(
+        variant_label="规则全内联",
+        node_count=len(sr_nodes),
+        group_count=len(groups),
+        skipped_anytls=skipped_anytls,
+        proxy_blocks=[_yaml_block(p, dash=True) for p in
+                      (n.to_clash_proxy() for n in sr_nodes)],
+        group_blocks=[_yaml_block(g, dash=True) for g in groups],
+        rule_lines=[_yaml_scalar(line) for line in _sr_yaml_rule_lines(rules, config)],
+    )
+
+
 # ---------------------------------------------------------------- SR 节点/分组行
 
 def _prepare_sr_nodes(real_nodes: list[Node],
@@ -658,6 +694,15 @@ def _sr_proxy_line(node: Node) -> str | None:
         if cred.get("flow"):
             params.append(f"flow={cred['flow']}")
         params += transport
+        # REALITY 公钥/短 ID 是握手必需，缺失则该节点必然超时。SR 配置行存在
+        # 两套方言写法，同时输出，不被识别的键会被解析器忽略。
+        reality = cred.get("reality-opts") or {}
+        pk = reality.get("public-key") or ""
+        sid = reality.get("short-id") or ""
+        if pk:
+            params += [f"reality-public-key={pk}", f"public-key={pk}"]
+        if sid:
+            params += [f"reality-short-id={sid}", f"short-id={sid}"]
     elif ntype == "trojan":
         params += [f"password={cred.get('password', '')}"]
         params += transport
@@ -749,7 +794,7 @@ def render_sr_conf(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntr
 def render_all(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
                purity: list[PurityResult] | None = None,
                stability: list[dict] | None = None) -> RenderResult:
-    """一次渲染四份产物 + 统计（pipeline 推荐入口）。"""
+    """一次渲染五份产物 + 统计（pipeline 推荐入口）。"""
     real = _real_nodes(nodes)
     sr_nodes, skipped_anytls, skipped_other = _prepare_sr_nodes(real, config)
     groups = build_groups(real, config=config, purity=purity, stability=stability)
@@ -768,6 +813,8 @@ def render_all(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
         clash_yaml=render_clash(real, config=config, rules=rules, offline=False,
                                 purity=purity, stability=stability),
         sr_conf=render_sr_conf(real, config=config, rules=rules, offline=False,
+                               purity=purity, stability=stability),
+        sr_yaml=render_sr_yaml(real, config=config, rules=rules,
                                purity=purity, stability=stability),
         clash_offline_yaml=render_clash(real, config=config, rules=rules, offline=True,
                                         purity=purity, stability=stability),

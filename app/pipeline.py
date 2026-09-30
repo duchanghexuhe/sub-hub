@@ -62,6 +62,7 @@ __all__ = [
 _ARTIFACT_ORDER: tuple[str, ...] = (
     "clash.yaml",
     "shadowrocket.conf",
+    "shadowrocket.yaml",
     "clash-offline.yaml",
     "shadowrocket-offline.conf",
 )
@@ -174,7 +175,7 @@ def refresh_all(config: AppConfig, store: Store, *, sub_id: int | None = None) -
 
 
 def rollback_to_version(config: AppConfig, store: Store, version: int) -> ConfigVersion:
-    """回退：把 data/out/v<version> 的 4 份产物复制为新版本目录（meta.note='回退到 v<NNNN>'）。
+    """回退：把 data/out/v<version> 的 5 份产物复制为新版本目录（meta.note='回退到 v<NNNN>'）。
 
     data/out 的第二个合法写入口（INTERFACES §4）。发布点与 publish 相同：
     产物先写完、meta.json 最后写；回退前对源产物做本地合法性检查（YAML 可解析、
@@ -188,8 +189,18 @@ def rollback_to_version(config: AppConfig, store: Store, version: int) -> Config
     for name in _ARTIFACT_ORDER:
         path = src / name
         if not path.is_file():
+            if name == "shadowrocket.yaml":
+                # v0006 及更早版本无此产物（conf 时代），回退时按需补渲染，
+                # 避免旧版本因新增产物永远无法回退。
+                continue
             raise FileNotFoundError(f"版本 v{version:04d} 缺少产物 {name}，无法回退")
         artifacts[name] = path.read_text(encoding="utf-8")
+    if "shadowrocket.yaml" not in artifacts:
+        nodes = store.list_nodes(filtered=False)
+        artifacts["shadowrocket.yaml"] = _render_artifacts(
+            config, store, nodes).get("shadowrocket.yaml", "")
+        if not artifacts["shadowrocket.yaml"]:
+            raise ValueError("回退被拒绝：无法为旧版本补渲染 SR YAML 产物")
     _sanity_check_artifacts(artifacts)
 
     new_summary = _proxy_summary(artifacts["clash.yaml"])
@@ -465,7 +476,7 @@ def _stability_for_render(store: Store) -> list[dict]:
 
 
 def _render_artifacts(config: AppConfig, store: Store, nodes: list[Node]) -> dict[str, str]:
-    """渲染 4 份产物（主版本 + 离线自包含版）。渲染失败向上抛，由调用方转为错误状态。
+    """渲染 5 份产物（主版本 + SR 专用 YAML + 离线自包含版）。渲染失败向上抛，由调用方转为错误状态。
 
     纯净度数据回灌（docs/02 §2）：读取库内最新检测结果传入渲染，驱动
     Claude 专用/备援组「评分降序、住宅恒在机房前」排序；尚无检测数据时
@@ -485,6 +496,8 @@ def _render_artifacts(config: AppConfig, store: Store, nodes: list[Node]) -> dic
         "shadowrocket.conf": templater.render_sr_conf(nodes, config=config, rules=rules,
                                                       offline=False, purity=purity,
                                                       stability=stability),
+        "shadowrocket.yaml": templater.render_sr_yaml(nodes, config=config, rules=rules,
+                                                      purity=purity, stability=stability),
         "clash-offline.yaml": templater.render_clash(nodes, config=config, rules=rules,
                                                      offline=True, purity=purity,
                                                      stability=stability),
@@ -656,6 +669,13 @@ def _sanity_check_artifacts(artifacts: dict[str, str]) -> None:
         for section in ("[Proxy]", "[Proxy Group]", "[Rule]"):
             if section not in artifacts[name]:
                 errors.append(f"{name} 缺少 {section} 段")
+    for name in ("shadowrocket.yaml",):
+        text = artifacts[name]
+        for key in ("proxies:", "proxy-groups:", "rules:"):
+            if key not in text:
+                errors.append(f"{name} 缺少 {key}")
+        if "rule-providers:" in text:
+            errors.append(f"{name} 不应包含 rule-providers（规则须全内联）")
     if errors:
         raise ValueError("回退被拒绝，源产物非法：" + "；".join(errors))
 

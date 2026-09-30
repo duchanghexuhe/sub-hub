@@ -61,14 +61,15 @@ logger = logging.getLogger("subhub.web")
 
 _ARTIFACTS: dict[str, dict[str, str]] = {
     "clash.yaml": {"media_type": "text/yaml; charset=utf-8", "label": "mihomo 主配置"},
-    "shadowrocket.conf": {"media_type": "text/plain; charset=utf-8", "label": "SR 主配置"},
+    "shadowrocket.conf": {"media_type": "text/plain; charset=utf-8", "label": "SR 主配置（conf，旧版）"},
+    "shadowrocket.yaml": {"media_type": "text/yaml; charset=utf-8", "label": "SR 主配置（推荐）"},
     "clash-offline.yaml": {"media_type": "text/yaml; charset=utf-8", "label": "mihomo 离线自包含配置"},
     "shadowrocket-offline.conf": {"media_type": "text/plain; charset=utf-8", "label": "SR 离线自包含配置"},
 }
 
 _PREVIEW_FMT: dict[str, str] = {
     "clash": "clash.yaml",
-    "sr": "shadowrocket.conf",
+    "sr": "shadowrocket.yaml",
 }
 
 _NODE_TAGS = {"residential", "iplc", "fake"}
@@ -334,7 +335,8 @@ def _bootstrap(config: AppConfig) -> dict[str, Any]:
         "baseUrl": config.base_url,
         "subUrls": {
             "clash": f"{config.sub_url_prefix}/clash.yaml",
-            "sr": f"{config.sub_url_prefix}/shadowrocket.conf",
+            "sr": f"{config.sub_url_prefix}/shadowrocket.yaml",
+            "srConf": f"{config.sub_url_prefix}/shadowrocket.conf",
             "clashOffline": f"{config.sub_url_prefix}/clash-offline.yaml",
             "srOffline": f"{config.sub_url_prefix}/shadowrocket-offline.conf",
         },

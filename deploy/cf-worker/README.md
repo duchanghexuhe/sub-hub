@@ -67,7 +67,7 @@ UI「镜像推送」或 `data/mirror.json`（字段与 `app/mirror.py` 一致）
 ```
 
 然后在 UI 点「立即推送」（或 `POST /api/mirror/push`）。推送的 key 为
-`<url_token>/<文件名>`（4 份产物：clash.yaml / shadowrocket.conf /
+`<url_token>/<文件名>`（5 份产物：clash.yaml / shadowrocket.conf / shadowrocket.yaml /
 clash-offline.yaml / shadowrocket-offline.conf），与 worker.js 的读取约定一致；
 内容 hash 无变化时不会重复推送。
 

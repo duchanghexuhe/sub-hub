@@ -14,6 +14,9 @@ proxies:
     flow: xtls-rprx-vision
     client-fingerprint: chrome
     servername: us-lax-01.example-airport-a.com
+    reality-opts:
+      public-key: pbk-us-lax-test
+      short-id: "0123abcd"
 
   - name: "🇺🇸 美国 DMIT 高防机房 01"
     type: vless
