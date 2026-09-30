@@ -20,6 +20,13 @@ services:
       # 与 NAS dockerd 同一代理惯例）；仅作用于规则镜像，机场订阅始终直连。
       # Clash 关闭时规则自动回落内置基线/缓存，分发与发布链路不受影响。
       SUBHUB_RULES_PROXY: http://192.168.31.132:7897
-      # 本容器不设全局 HTTP(S)_PROXY：机场订阅必须直连（机场常拒绝境外出口），
-      # 容器内探测实例控制 API（127.0.0.1:9095）也绝不能走代理。
+      # HTTPS_PROXY 仅供默认 trust_env 的客户端（= 镜像推送）使用：2026-09-30 实测
+      # GFW 对 api.cloudflare.com 的 IPv4 DNS 污染（解析到非 CF IP、证书主机名不匹配，
+      # IPv6 正常但容器无 IPv6），推送须经 Clash 出口在远端解析域名。
+      # 机场订阅（fetcher）/探测（probe）/规则镜像（rulesync）均显式 trust_env=False
+      # 或显式指定代理，不受此变量影响；本机回环也用 NO_PROXY 兜底。
+      HTTPS_PROXY: http://192.168.31.132:7897
+      NO_PROXY: localhost,127.0.0.1
+      # 不设 HTTP_PROXY（明文 http 目标保持直连）；Clash 关闭时镜像推送会失败，
+      # 但仅影响公网镜像更新，本地分发与发布链路不受影响。
     restart: unless-stopped
