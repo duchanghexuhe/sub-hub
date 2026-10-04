@@ -103,7 +103,79 @@ rules:
       moomoo 等 30+ 域）显式推向代理，富途按境外 IP 发 15 分钟延迟行情；ChinaMax 亦无覆盖。
       域名全集取自上游 Global 的 futu*/moomoo* 归类，转自维护直连，增删只改本文件
 
-  # ---- 3. Claude（上游）----
+  # ---- 3. Steam（自维护补丁：下载 CDN 钉直连）----
+  - name: steam-download
+    category: 直连（自维护补丁）
+    source: builtin
+    clash_file: steam-download.yaml
+    sr_file: steam-download.list
+    policy: DIRECT
+    behavior: classical   # payload 为 DOMAIN-SUFFIX,x 行，behavior 须为 classical
+    domains:
+      - steamcontent.com   # 游戏内容 CDN（所有大流量下载）
+      - steamserver.net    # Steam 网络/边缘 CDN
+      - steamchina.com     # 蒸汽平台（国服）
+    note: 校准（2026-10-04 实测）：游戏下载走直连是对的（满带宽且不烧机场流量）；
+      显式钉死而不赌漏网之鱼默认值——鱼组被手动切回 🚀 时下载流量不跟着改道代理
+
+  # ---- 4. Steam（自维护补丁：官网系走代理）----
+  - name: steam-extra
+    category: Steam（自维护补丁）
+    source: builtin
+    clash_file: steam-extra.yaml
+    sr_file: steam-extra.list
+    policy: "🚀 节点选择"
+    behavior: classical
+    domains:
+      - steampowered.com       # 商店/登录/API/客户端引导下载
+      - steamcommunity.com     # 社区（被墙，直连必挂）
+      - steamstatic.com        # 商店静态资源 CDN
+      - steamusercontent.com   # 用户内容（截图/创意工坊预览）
+      - steam-chat.com         # 网页版好友聊天
+      - steamgames.com         # Valve 老域名
+      - steamdb.info           # 第三方数据查询
+    note: 校准（2026-10-04 实测）：Global/ChinaMax 均不覆盖 steampowered/steamcommunity
+      （Global 仅 steamconnecttest.com，ChinaMax 只收国内第三方站），漏网之鱼翻转默认
+      直连后官网系全部落 MATCH 直连被墙不可用；显式钉死走代理，下载 CDN 由
+      steam-download 前置钉直连互不干扰
+
+  # ---- 5. M-Team（自维护补丁：PT tracker 钉直连）----
+  - name: mteam-tracker
+    category: 直连（自维护补丁）
+    source: builtin
+    clash_file: mteam-tracker.yaml
+    sr_file: mteam-tracker.list
+    policy: DIRECT
+    behavior: classical   # payload 为 DOMAIN-SUFFIX,x 行，behavior 须为 classical
+    domains:
+      - t.m-team.cc
+      - tracker.m-team.cc
+      - tr.m-team.cc
+      - announce.m-team.cc
+      - t.m-team.io
+      - tracker.m-team.io
+      - tr.m-team.io
+      - announce.m-team.io
+    note: PT tracker/announce 必须以真实 IP 汇报（经代理汇报会被 tracker 记成出口 IP，
+      做种联通性归零伤分享率），且机场普遍禁 P2P——announce 域名候选全量前置钉死
+      直连，防 mteam-web 整域后缀误伤；裸 IP 的 peer 连接落漏网之鱼默认直连，无需处理
+
+  # ---- 6. M-Team（自维护补丁：站点走代理）----
+  - name: mteam-web
+    category: PT（自维护补丁）
+    source: builtin
+    clash_file: mteam-web.yaml
+    sr_file: mteam-web.list
+    policy: "🚀 节点选择"
+    behavior: classical
+    domains:
+      - m-team.cc
+      - m-team.io
+    note: 校准（2026-10-04 实测）：ChinaMax 把 m-team.cc 误归类国内直连（.m-team.cc
+      在 ChinaMax_Domain 中），站点直连不可用；整域后缀走代理（tracker 域已被
+      mteam-tracker 前置钉直连），增删 PT 站照此两段式复制
+
+  # ---- 7. Claude（上游）----
   - name: Claude
     category: Claude（上游）
     source: blackmatrix7
@@ -113,7 +185,7 @@ rules:
     policy: "🛑 Claude 专用"
     behavior: classical
 
-  # ---- 4. AI 单列 → 各自组 ----
+  # ---- 8. AI 单列 → 各自组 ----
   - name: OpenAI
     category: AI 单列
     source: blackmatrix7
@@ -176,7 +248,7 @@ rules:
       - cursor.sh
     note: 校准（2026-09-27 实测）：blackmatrix7 无 Cursor/CursorAI 规则集，转自维护内置基线
 
-  # ---- 5. AI 兜底（聚合）----
+  # ---- 9. AI 兜底（聚合）----
   - name: AI
     category: AI 兜底
     source: builtin
@@ -195,7 +267,7 @@ rules:
       - poe.com
     note: 校准（2026-09-27 实测）：blackmatrix7 无 AI 聚合目录，转自维护兜底清单（未被单列的 AI 服务）
 
-  # ---- 6. 社交 ----
+  # ---- 10. 社交 ----
   - name: telegram-extra
     category: 社交（自维护补丁）
     source: builtin
@@ -238,7 +310,7 @@ rules:
     note: 校准（2026-09-29 实测）：x.com/twimg.com 虽已覆盖于 Global，但上游主文件有桩化
       前科（Netflix/ChinaMax 同款问题），推特视频媒体 twimg 系显式归组，不赌 Global 完整性
 
-  # ---- 7. 流媒体 → 对应 select 组 ----
+  # ---- 11. 流媒体 → 对应 select 组 ----
   - name: Netflix
     category: 流媒体
     source: blackmatrix7
@@ -295,7 +367,7 @@ rules:
     policy: "🚀 节点选择"
     behavior: classical
 
-  # ---- 8. 大厂 → 对应 select 组 ----
+  # ---- 12. 大厂 → 对应 select 组 ----
   - name: GitHub
     category: 大厂
     source: blackmatrix7
@@ -333,7 +405,7 @@ rules:
     policy: "🍎 苹果服务"
     behavior: classical
 
-  # ---- 9. 国际大类 → 节点选择 ----
+  # ---- 13. 国际大类 → 节点选择 ----
   - name: Global
     category: 国际大类
     source: blackmatrix7
@@ -355,7 +427,7 @@ rules:
     policy: "🚀 节点选择"
     behavior: classical
 
-  # ---- 10-11. 直连（Loyalsoldier txt payload，rulesync 转双格式缓存）----
+  # ---- 14-15. 直连（Loyalsoldier txt payload，rulesync 转双格式缓存）----
   - name: ChinaMax
     category: 直连
     source: blackmatrix7

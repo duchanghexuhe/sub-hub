@@ -1,0 +1,10 @@
+# 本文件由 sub-hub rulesync 依据 rules_manifest.yaml 的 domains/ips 生成（内置自维护规则）
+# 请勿手工编辑；增删请改 rules_manifest.yaml 后重跑 build_baselines()
+payload:
+  - DOMAIN-SUFFIX,steampowered.com
+  - DOMAIN-SUFFIX,steamcommunity.com
+  - DOMAIN-SUFFIX,steamstatic.com
+  - DOMAIN-SUFFIX,steamusercontent.com
+  - DOMAIN-SUFFIX,steam-chat.com
+  - DOMAIN-SUFFIX,steamgames.com
+  - DOMAIN-SUFFIX,steamdb.info

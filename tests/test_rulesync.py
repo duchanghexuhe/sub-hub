@@ -44,13 +44,19 @@ DOCS_CLAUDE_DOMAINS = [
 
 # docs/02 §3 规则链顺序（manifest 列表顺序不得重排）
 EXPECTED_CHAIN = [
-    "claude-extra", "futu-extra", "Claude", "OpenAI", "Gemini", "Copilot",
+    "claude-extra", "futu-extra",
+    "steam-download", "steam-extra", "mteam-tracker", "mteam-web",
+    "Claude", "OpenAI", "Gemini", "Copilot",
     "Grok", "Perplexity", "CursorAI", "AI",
     "telegram-extra", "Telegram", "Twitter",
     "Netflix", "Disney", "YouTube", "Spotify", "TikTok", "PrimeVideo",
     "GitHub", "Google", "Microsoft", "Apple",
     "Global", "ProxyGFWlist", "ChinaMax", "CNCIDR", "Lan", "Download",
 ]
+
+
+def _builtin_entries() -> list[dict]:
+    return [e for e in resolve_entries() if str(e.get("source")) == "builtin"]
 
 
 def _entries_by_name() -> dict[str, dict]:
@@ -96,11 +102,37 @@ class TestClaudeExtraBaseline:
         ydoc = yaml.safe_load((BASELINE_DIR / "claude-extra.yaml").read_text(encoding="utf-8"))
         ydomains = {str(x).split(",", 1)[1] for x in ydoc["payload"]}
         llines = [
-            l.strip() for l in (BASELINE_DIR / "claude-extra.list").read_text(encoding="utf-8").splitlines()
+            l.strip() for l in (BASELINE_DIR / "claude-extra.list").read_text(encoding="utf-8")
+            .splitlines()
             if l.strip() and not l.strip().startswith("#")
         ]
         ldomains = {l.split(",", 1)[1] for l in llines}
         assert ydomains == ldomains
+
+
+class TestBuiltinBaselinesGeneric:
+    """全部 builtin 条目的基线一致性：改了 manifest domains 忘跑 build_baselines() 即测试失败。"""
+
+    @pytest.mark.parametrize("entry", _builtin_entries(), ids=lambda e: str(e["name"]))
+    def test_baseline_covers_manifest_domains(self, entry: dict):
+        name = str(entry["name"])
+        domains = {str(d).strip() for d in (entry.get("domains") or []) if str(d).strip()}
+        for fname in (str(entry["clash_file"]), str(entry["sr_file"])):
+            path = BASELINE_DIR / fname
+            assert path.exists(), f"{name} 缺少内置基线文件 {fname}（跑 build_baselines()）"
+            text = path.read_text(encoding="utf-8")
+            if fname.endswith(".yaml"):
+                doc = yaml.safe_load(text)
+                lines = [str(x).strip() for x in doc.get("payload", [])]
+            else:
+                lines = [
+                    l.strip() for l in text.splitlines()
+                    if l.strip() and not l.strip().startswith("#")
+                ]
+            assert lines, f"{name}/{fname} 规则行为空"
+            covered = {l.split(",", 1)[1] for l in lines if "," in l}
+            missing = domains - covered
+            assert missing == set(), f"{name}/{fname} 基线缺少域名: {sorted(missing)}"
 
     def test_builtin_sync_offline_writes_baseline(self, config, monkeypatch):
         """完全断网（mock 全部上游失败）时，builtin 条目仍从基线复制到 data/rules/。"""

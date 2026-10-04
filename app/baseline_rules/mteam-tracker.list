@@ -1,0 +1,10 @@
+# 本文件由 sub-hub rulesync 依据 rules_manifest.yaml 的 domains/ips 生成（内置自维护规则）
+# 请勿手工编辑；增删请改 rules_manifest.yaml 后重跑 build_baselines()
+DOMAIN-SUFFIX,t.m-team.cc
+DOMAIN-SUFFIX,tracker.m-team.cc
+DOMAIN-SUFFIX,tr.m-team.cc
+DOMAIN-SUFFIX,announce.m-team.cc
+DOMAIN-SUFFIX,t.m-team.io
+DOMAIN-SUFFIX,tracker.m-team.io
+DOMAIN-SUFFIX,tr.m-team.io
+DOMAIN-SUFFIX,announce.m-team.io

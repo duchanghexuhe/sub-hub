@@ -191,7 +191,7 @@ def test_load_rules_manifest_order_and_policy():
     assert entries[0].name == "claude-extra"
     assert entries[0].policy == "🛑 Claude 专用"
     assert entries[-1].name == "Download"
-    assert len(entries) == 29
+    assert len(entries) == 33
     by_name = {e.name: e for e in entries}
     assert by_name["Claude"].policy == "🛑 Claude 专用"
     assert by_name["OpenAI"].policy == "🎁 OpenAI"
@@ -199,6 +199,27 @@ def test_load_rules_manifest_order_and_policy():
     assert by_name["TikTok"].policy == "🚀 节点选择"
     assert by_name["GitHub"].policy == "📢 谷歌服务"
     assert by_name["CNCIDR"].policy == "DIRECT"
+
+
+def test_selfmaintained_patches_precede_upstream_sets():
+    """自维护补丁必须先于其要纠正的上游规则集（mihomo 首匹配生效）。
+
+    回归锚点（2026-10-04 实测）：m-team 被 ChinaMax 误归类直连、Steam 官网系
+    零覆盖落 MATCH 直连——两者都靠「补丁条目前置」修复，顺序回退即 bug 复发。
+    """
+    entries = load_rules_manifest()
+    order = {e.name: i for i, e in enumerate(entries)}
+    by_name = {e.name: e for e in entries}
+    # Steam：官网系走代理、下载 CDN 钉直连（钉直连条目在前）
+    assert by_name["steam-extra"].policy == "🚀 节点选择"
+    assert by_name["steam-download"].policy == "DIRECT"
+    assert order["steam-download"] < order["steam-extra"]
+    assert order["steam-extra"] < order["ChinaMax"] < order["Download"]
+    # M-Team：tracker 候选域钉直连必须先于整域后缀走代理
+    assert by_name["mteam-web"].policy == "🚀 节点选择"
+    assert by_name["mteam-tracker"].policy == "DIRECT"
+    assert order["mteam-tracker"] < order["mteam-web"]
+    assert order["mteam-web"] < order["ChinaMax"]
 
 
 def test_build_groups_names_complete(nodes: list[Node], config: AppConfig):

@@ -206,7 +206,7 @@ class TestFullChainPublish:
         vdir = utils.version_dir(e2e_config.out_dir, published.version)
         doc = _clash_doc((vdir / "clash.yaml").read_text(encoding="utf-8"))
         assert len(doc["proxies"]) == 15                      # 15 个真实节点
-        assert len(doc["rules"]) == 29 + 4 + 1                # 4 条内建 LAN 护栏 + 29 条 RULE-SET + MATCH
+        assert len(doc["rules"]) == 33 + 4 + 1                # 4 条内建 LAN 护栏 + 33 条 RULE-SET + MATCH
         assert doc["rules"][-1] == f"MATCH,{G_FINAL}"
         assert doc["sniffer"]["enable"] is True       # 裸 IP 连接靠嗅探恢复域名
 
