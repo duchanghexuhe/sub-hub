@@ -18,13 +18,24 @@ button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
 button.danger{color:var(--bad)}
 button:disabled{opacity:.5;cursor:default}
 input,select,textarea{background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px}
-header{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+/* ---------- 顶栏：标题行 + 页签行，整块吸顶 ---------- */
+.topbar{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
+header{display:flex;align-items:center;gap:14px;padding:12px 20px 4px}
 header h1{font-size:17px;margin:0;white-space:nowrap}
 header .ver{color:var(--muted)}
 header .spacer{flex:1}
-main{max-width:1180px;margin:0 auto;padding:16px 20px 60px;display:grid;gap:16px}
+#tabs-nav{display:flex;gap:2px;padding:0 12px;overflow-x:auto;scrollbar-width:none}
+#tabs-nav::-webkit-scrollbar{display:none}
+.tab-btn{display:inline-flex;align-items:center;gap:5px;background:none;border:0;border-bottom:2px solid transparent;border-radius:6px 6px 0 0;padding:7px 10px;color:var(--muted);font-size:14px}
+.tab-btn:hover{color:var(--fg)}
+.tab-btn.on{color:var(--fg);border-bottom-color:var(--acc)}
+.tab-n{font-size:11px;line-height:16px;padding:0 7px;border-radius:9px;background:var(--panel2);color:var(--muted)}
+.tab-btn.on .tab-n{color:#cfe0ff}
+main{max-width:1180px;margin:0 auto;padding:14px 20px 60px}
+.pane{display:grid;gap:14px}
+.pane[hidden]{display:none}
 section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
-section h2{font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:10px}
+section h2{font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 section h2 .hint{font-weight:400;font-size:12px;color:var(--muted)}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr));gap:10px}
 .card{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
@@ -61,7 +72,11 @@ th{color:var(--muted);font-weight:500;white-space:nowrap}
 details{margin:6px 0}
 details>summary{cursor:pointer;padding:4px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;user-select:none}
 details[open]>summary{border-bottom-left-radius:0;border-bottom-right-radius:0}
-details>div,details>table{border:1px solid var(--line);border-top:0;border-radius:0 0 6px 6px;padding:4px 8px;background:#171b27}
+details>div,details>table,details>form{border:1px solid var(--line);border-top:0;border-radius:0 0 6px 6px;padding:4px 8px;background:#171b27}
+/* 预览折叠体例外：内部已有带边框的 pre，不再套盒子 */
+#preview-wrap>div{border:0;border-radius:0;background:none;padding:0}
+/* 镜像表单内容比列表行高，多留内边距 */
+#mirror-form-wrap>form{padding:10px 12px}
 .row-alert{background:rgba(224,92,92,.12)}
 .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
 .tabs{display:flex;gap:6px;margin:8px 0}
@@ -74,6 +89,17 @@ pre.preview{background:#10131b;border:1px solid var(--line);border-radius:6px;pa
 .top3 .card{flex:1;min-width:200px}
 .top3 .rank{font-size:20px;color:#ffd76b}
 .stat{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin:4px 0}
+/* ---------- 镜像「已保存配置」概览面板 ---------- */
+#mirror-overview{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 10px}
+.kv{display:flex;gap:10px;padding:6px 0;border-bottom:1px dashed var(--line);align-items:baseline}
+.kv:last-child{border-bottom:0;padding-bottom:0}
+.kv>label{flex:0 0 96px;color:var(--muted);font-size:12px;flex:none}
+.kv>div{flex:1;min-width:0;font-size:13px;overflow-wrap:anywhere}
+.kv .sub{display:block;margin-top:3px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-size:11px;padding:1px 8px;border-radius:10px;border:1px solid var(--line);color:var(--muted)}
+.chip.on{color:var(--ok);border-color:var(--ok)}
+.chip.off{color:var(--warn);border-color:var(--warn)}
 /* ---------- 节点稳定性：健康时间块条 ---------- */
 .stab-row{display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)}
 .stab-row:last-child{border-bottom:none}
@@ -106,6 +132,7 @@ pre.preview{background:#10131b;border:1px solid var(--line);border-radius:6px;pa
   #node-filtered-body{padding-left:0;padding-right:0}
   #node-filtered-body>table{padding:4px 8px}
 }
+#version-timeline tr.cur td{background:rgba(91,157,255,.07)}
 #toast{position:fixed;right:16px;bottom:16px;display:grid;gap:8px;z-index:99}
 #toast div{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--acc);padding:8px 14px;border-radius:6px;max-width:420px}
 #toast div.err{border-left-color:var(--bad)}
@@ -132,14 +159,16 @@ pre.preview{background:#10131b;border:1px solid var(--line);border-radius:6px;pa
 .modal-bd pre{background:#10131b;border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:12px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:6px 0}
 .modal-bd .warnbox{background:rgba(224,168,60,.1);border:1px solid var(--warn);border-radius:6px;padding:8px 10px;color:var(--warn);font-size:12px;margin:8px 0}
 .modal-bd .mut{color:var(--muted);font-size:12px}
-section h2{flex-wrap:wrap}
 /* ---------- 移动端适配（≤640px）：表格转卡片、防溢出、触控与 iOS 聚焦放大修复 ---------- */
 @media (max-width:640px){
   body{font:14px/1.5 -apple-system,system-ui,"Microsoft YaHei",sans-serif}
-  header{padding:10px 12px;gap:8px}
+  header{padding:10px 12px 4px;gap:8px}
   header h1{font-size:16px}
   header button{white-space:nowrap;padding:6px 10px;min-height:32px}
+  #tabs-nav{padding:0 6px}
+  .tab-btn{padding:8px 9px;font-size:13px}
   main{padding:10px 10px 60px;gap:12px}
+  .pane{gap:12px}
   section{padding:12px}
   .cards{grid-template-columns:1fr}
   form.inline input[name=name]{width:96px}
@@ -159,7 +188,8 @@ section h2{flex-wrap:wrap}
   table td.t::before{content:none}
   table td.t .muted{display:inline}
   tr.row-alert{border-color:var(--bad)}
-  details>div,details>table{padding:2px 6px}
+  details>div,details>table,details>form{padding:2px 6px}
+  #mirror-form-wrap>form{padding:8px}
   .linkrow{flex-wrap:wrap}
   .linkrow>span{width:auto;flex:1 1 100%}
   .linkrow input{min-width:0;flex:1 1 140px;font-size:13px}
@@ -170,17 +200,30 @@ section h2{flex-wrap:wrap}
 </style>
 </head>
 <body>
-<header>
-  <h1>sub-hub 管理台</h1>
-  <span class="ver" id="head-status">加载中…</span>
-  <div class="spacer"></div>
-  <button id="btn-reload">↻ 刷新全部数据</button>
-</header>
+<div class="topbar">
+  <header>
+    <h1>sub-hub 管理台</h1>
+    <span class="ver" id="head-status">加载中…</span>
+    <div class="spacer"></div>
+    <button id="btn-reload" title="重新拉取页面数据（不重新抓取机场）">↻ 刷新数据</button>
+  </header>
+  <nav id="tabs-nav" aria-label="功能区页签">
+    <button type="button" class="tab-btn on" data-tab="subs">订阅<span class="tab-n" id="tabn-subs" hidden></span></button>
+    <button type="button" class="tab-btn" data-tab="nodes">节点<span class="tab-n" id="tabn-nodes" hidden></span></button>
+    <button type="button" class="tab-btn" data-tab="config">配置</button>
+    <button type="button" class="tab-btn" data-tab="ops">设置</button>
+  </nav>
+</div>
 <main>
 
-<!-- ① 订阅卡列表 -->
+<!-- ① 订阅页：卡片 + 添加 + 全量刷新 -->
+<div class="pane" id="pane-subs">
 <section id="sec-subs">
-  <h2>订阅 <span class="hint">机场订阅管理与流量用量</span></h2>
+  <h2>订阅 <span class="hint">机场订阅管理与流量用量</span>
+    <span style="flex:1"></span>
+    <span class="muted" id="refresh-msg"></span>
+    <button id="btn-refresh" class="primary" title="重新抓取全部机场订阅并重建配置">↻ 刷新全部订阅</button>
+  </h2>
   <div class="cards" id="sub-cards"></div>
   <form class="inline" id="sub-add-form">
     <input name="name" placeholder="别名（如 kuai）" required>
@@ -190,13 +233,15 @@ section h2{flex-wrap:wrap}
     <span class="muted" id="sub-add-msg"></span>
   </form>
 </section>
+</div>
 
-<!-- ② 节点总表（融合纯净度报告与节点稳定性） -->
+<!-- ② 节点页：融合纯净度报告与节点稳定性 -->
+<div class="pane" id="pane-nodes" hidden>
 <section id="sec-nodes">
   <h2>节点总表 <span class="hint" id="node-count"></span>
-    <span class="hint">纯净度 + 24h 稳定性逐节点融合；两路数据已自动驱动策略组，无需人工挑选</span>
+    <span class="hint" title="纯净度与 24h 稳定性两路数据已自动驱动策略组，无需人工挑选">纯净度 + 稳定性已自动驱动策略组</span>
     <span style="flex:1"></span>
-    <label class="muted"><input type="checkbox" id="scan-full"> 全量扫描</label>
+    <label class="muted"><input type="checkbox" id="scan-full"> 全量</label>
     <button id="btn-scan">扫描纯净度</button>
   </h2>
   <div class="top3" id="purity-top3"></div>
@@ -210,79 +255,90 @@ section h2{flex-wrap:wrap}
       <option value="fake">已过滤</option>
     </select>
     <select id="node-sub"><option value="">全部机场</option></select>
+    <button type="button" id="btn-toggle-groups">展开全部分组</button>
   </div>
   <div id="node-groups"></div>
   <details id="node-filtered"><summary>已过滤节点（假节点/广告占位）</summary><div id="node-filtered-body"></div></details>
   <details id="node-anomalies" style="display:none"><summary>解析异常节点</summary><div id="node-anomalies-body"></div></details>
 </section>
+</div>
 
-<!-- ③ 配置产物 -->
+<!-- ③ 配置页：订阅链接 + 离线包 + 预览（折叠）+ 版本时间线 -->
+<div class="pane" id="pane-config" hidden>
 <section id="sec-config">
   <h2>配置产物 <span class="hint" id="config-summary"></span></h2>
   <div class="stat" id="offline-hint"></div>
   <div id="sub-links"></div>
-  <div class="tabs">
-    <button data-fmt="clash" class="on">mihomo YAML 预览</button>
-    <button data-fmt="sr">SR yaml 预览</button>
-  </div>
-  <pre class="preview" id="config-preview">（尚未发布）</pre>
-  <h2 style="margin-top:14px">版本时间线 <span class="hint">保留最近 5 版，可一键回退</span></h2>
-  <div id="version-timeline"></div>
   <p class="muted">
     离线自包含包（规则全内联，外网兜底）：
     <a id="dl-clash-offline" href="#" download>下载 clash-offline.yaml</a> ・
     <a id="dl-sr-offline" href="#" download>下载 shadowrocket-offline.conf</a>
   </p>
+  <details id="preview-wrap">
+    <summary>预览配置内容（展开自动加载）</summary>
+    <div>
+      <div class="tabs">
+        <button data-fmt="clash" class="on">mihomo YAML 预览</button>
+        <button data-fmt="sr">SR yaml 预览</button>
+      </div>
+      <pre class="preview" id="config-preview">（展开后自动加载）</pre>
+    </div>
+  </details>
+  <h2 style="margin-top:14px">版本时间线 <span class="hint">保留最近 5 版，可一键回退</span></h2>
+  <div id="version-timeline"></div>
 </section>
+</div>
 
-<!-- ⑤ 操作区 -->
+<!-- ④ 设置页：运行状态 + 公网镜像 -->
+<div class="pane" id="pane-ops" hidden>
 <section id="sec-ops">
-  <h2>操作</h2>
-  <form class="inline" style="margin:0 0 12px">
-    <button type="button" id="btn-refresh" class="primary">立即刷新全部订阅</button>
-    <span class="muted" id="refresh-msg"></span>
-  </form>
-  <h2 style="font-size:13px">规则源状态</h2>
+  <h2>运行状态</h2>
   <div class="stat" id="rules-status">加载中…</div>
-  <h2 style="font-size:13px;margin-top:12px">公网镜像（可选）
+</section>
+<section id="sec-mirror">
+  <h2>公网镜像（可选）
     <button type="button" class="help-btn" id="btn-mirror-help" title="配置教程" aria-label="公网镜像配置教程">?</button>
   </h2>
-  <div class="stat" id="mirror-status"></div>
-  <div id="mirror-links"></div>
-  <form id="mirror-form">
-    <div class="mirror-toprow">
-      <select name="provider">
-        <option value="cf-kv">CF Workers + KV（推荐）</option>
-        <option value="github">GitHub 公库随机路径</option>
-      </select>
-      <label class="muted"><input type="checkbox" name="enabled"> 启用</label>
-      <button type="submit">保存并立即试推</button>
-    </div>
-    <div class="mirror-grid" id="mirror-fields-cf-kv">
-      <label>url_token（第 2 步生成）
-        <input name="cf_url_token" placeholder="随机串，须与 Worker 的 MIRROR_TOKEN 一致" autocomplete="off"></label>
-      <label>api_token（第 5 步创建）
-        <input name="cf_api_token" placeholder="Cloudflare API Token，KV Storage: Edit" autocomplete="off"></label>
-      <label>account_id（第 5 步查看）
-        <input name="cf_account_id" placeholder="32 位，Workers &amp; Pages 右侧 Account details" autocomplete="off"></label>
-      <label>namespace_id（第 3 步输出）
-        <input name="cf_namespace_id" placeholder="wrangler kv namespace create 的 id" autocomplete="off"></label>
-      <label>worker_base（第 4 步部署输出）
-        <input name="cf_worker_base" placeholder="https://sub-hub-mirror.你的子域.workers.dev" autocomplete="off"></label>
-    </div>
-    <div class="mirror-grid" id="mirror-fields-github" hidden>
-      <label>api_token（Fine-grained Token）
-        <input name="gh_api_token" placeholder="仓库限定，Contents: Read and write" autocomplete="off"></label>
-      <label>owner（用户名）
-        <input name="gh_owner" placeholder="仓库所有者" autocomplete="off"></label>
-      <label>repo（仓库名）
-        <input name="gh_repo" placeholder="公开仓库" autocomplete="off"></label>
-      <label>branch（可选）
-        <input name="gh_branch" placeholder="默认 main" autocomplete="off"></label>
-    </div>
-    <p class="mirror-hint" id="mirror-cred-hint"></p>
-  </form>
+  <p class="muted">把渲染好的配置自动推送到公网镜像地址，外网客户端订阅镜像即可更新，NAS 无需公网条件。</p>
+  <div id="mirror-overview">加载中…</div>
+  <details id="mirror-form-wrap" open>
+    <summary id="mirror-form-summary">填写设置与凭据</summary>
+    <form id="mirror-form">
+      <div class="mirror-toprow">
+        <select name="provider">
+          <option value="cf-kv">CF Workers + KV（推荐）</option>
+          <option value="github">GitHub 公库随机路径</option>
+        </select>
+        <label class="muted"><input type="checkbox" name="enabled"> 启用</label>
+        <button type="submit">保存并立即试推</button>
+      </div>
+      <div class="mirror-grid" id="mirror-fields-cf-kv">
+        <label>url_token（第 2 步生成）
+          <input name="cf_url_token" placeholder="随机串，须与 Worker 的 MIRROR_TOKEN 一致" autocomplete="off"></label>
+        <label>api_token（第 5 步创建）
+          <input name="cf_api_token" placeholder="Cloudflare API Token，KV Storage: Edit" autocomplete="off"></label>
+        <label>account_id（第 5 步查看）
+          <input name="cf_account_id" placeholder="32 位，Workers &amp; Pages 右侧 Account details" autocomplete="off"></label>
+        <label>namespace_id（第 3 步输出）
+          <input name="cf_namespace_id" placeholder="wrangler kv namespace create 的 id" autocomplete="off"></label>
+        <label>worker_base（第 4 步部署输出）
+          <input name="cf_worker_base" placeholder="https://sub-hub-mirror.你的子域.workers.dev" autocomplete="off"></label>
+      </div>
+      <div class="mirror-grid" id="mirror-fields-github" hidden>
+        <label>api_token（Fine-grained Token）
+          <input name="gh_api_token" placeholder="仓库限定，Contents: Read and write" autocomplete="off"></label>
+        <label>owner（用户名）
+          <input name="gh_owner" placeholder="仓库所有者" autocomplete="off"></label>
+        <label>repo（仓库名）
+          <input name="gh_repo" placeholder="公开仓库" autocomplete="off"></label>
+        <label>branch（可选）
+          <input name="gh_branch" placeholder="默认 main" autocomplete="off"></label>
+      </div>
+      <p class="mirror-hint">凭据只存 NAS 本地、页面不回显；留空输入框 = 保持已存值。分步教程点标题旁 ？</p>
+    </form>
+  </details>
 </section>
+</div>
 
 </main>
 
@@ -404,9 +460,47 @@ async function guard(btn, fn){
   finally{ if(btn){ btn.disabled = false; if(isBtn && old) btn.textContent = old; } }
 }
 
+/* ---------- 页签框架：按页懒加载，切页即刷新当页数据 ---------- */
+const PANES = ["subs", "nodes", "config", "ops"];
+let currentTab = null;
+function setTabN(name, n){
+  const el = $("#tabn-" + name);
+  if(!el) return;
+  el.hidden = !(n > 0);
+  el.textContent = n;
+}
+function switchTab(name){
+  if(!PANES.includes(name)) name = "subs";
+  currentTab = name;
+  document.querySelectorAll("#tabs-nav .tab-btn").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+  PANES.forEach(p => { $("#pane-" + p).hidden = p !== name; });
+  try{ if(location.hash !== "#" + name) history.replaceState(null, "", "#" + name); }catch(e){}
+}
+async function loadTab(name){
+  if(name === "subs") return loadSubs();
+  if(name === "nodes"){
+    await loadContexts().catch(() => {});
+    await Promise.allSettled([loadNodes(), loadAnomalies()]);
+    return;
+  }
+  if(name === "config") return loadConfig();
+  if(name === "ops") return Promise.allSettled([loadOps(), loadMirror()]);
+}
+document.querySelectorAll("#tabs-nav .tab-btn").forEach(b => b.addEventListener("click", () => {
+  if(b.dataset.tab === currentTab) return;
+  switchTab(b.dataset.tab);
+  loadTab(currentTab).catch(() => {});
+}));
+// 手动改地址栏 hash（或前进后退）同步切页签
+window.addEventListener("hashchange", () => {
+  const name = (location.hash || "").replace(/^#/, "") || "subs";
+  if(name !== currentTab){ switchTab(name); loadTab(currentTab).catch(() => {}); }
+});
+
 /* ---------- ① 订阅 ---------- */
 async function loadSubs(){
   const data = await api("/api/subs");
+  setTabN("subs", data.total);
   const box = $("#sub-cards");
   box.innerHTML = "";
   if(!data.total){ box.innerHTML = '<div class="muted">还没有订阅，先用下方表单添加一个机场。</div>'; }
@@ -442,9 +536,9 @@ async function loadSubs(){
         await reload();
       });
     });
-    card.querySelector('[data-act=del]').addEventListener("click", () => {
+    card.querySelector('[data-act=del]').addEventListener("click", (ev) => {
       if(!confirm(`确定删除订阅「${s.name}」？其节点将从配置中移除。`)) return;
-      guard(ev.target, async () => {
+      guard(ev.currentTarget, async () => {
         const r = await api(`/api/subs/${s.id}`, {method:"DELETE"});
         toast(`已删除「${s.name}」` + (r.result && r.result.published ? `，配置已重建（v${String(r.result.version).padStart(4,"0")}）` : "，配置重建未发布"));
         await reload();
@@ -472,10 +566,21 @@ $("#sub-add-form").addEventListener("submit", (ev) => {
   });
 });
 
+$("#btn-refresh").addEventListener("click", (ev) => {
+  guard(ev.target, async () => {
+    const r = await api("/api/refresh", {method:"POST", body:{}});
+    if(r.published) toast(`刷新完成：配置 v${String(r.version).padStart(4,"0")}（${r.node_count} 节点，滤除 ${r.filtered_count}）`);
+    else toast("刷新完成但未发布新配置：" + ((r.errors||[]).join("；") || "沿用上一版"), true);
+    if((r.stale_subs||[]).length) toast("以下订阅抓取异常，沿用旧快照：" + r.stale_subs.join("、"), true);
+    await reload();
+  });
+});
+
 /* ---------- ② 节点总表（融合纯净度 + 24h 稳定性） ---------- */
 const SLOW_MS = 500;        // 「通但慢」黄档阈值（ms），与健康采样口径一致
 const HEALTH = new Map();   // "sub␀name" → 24h 稳定性摘要（/api/health/history）
 const LOST = new Set();     // 「家宽→机房」属性变化的 (sub, name) 集合
+let groupsOpen = false;     // 分组「全部展开」开关状态（重渲染后复位）
 const nkey = (sub, name) => sub + "\u0000" + name;
 
 async function loadContexts(){
@@ -524,6 +629,12 @@ async function loadContexts(){
   }
 }
 
+$("#btn-toggle-groups").addEventListener("click", () => {
+  groupsOpen = !groupsOpen;
+  document.querySelectorAll("#node-groups details").forEach(d => d.open = groupsOpen);
+  $("#btn-toggle-groups").textContent = groupsOpen ? "收起全部分组" : "展开全部分组";
+});
+
 function stabSort(a, b){
   // 组内「最优在前」：成功率降序 → 均延升序 → Claude 评分降序 → 名称
   const ha = HEALTH.get(nkey(a.source_sub, a.name)), hb = HEALTH.get(nkey(b.source_sub, b.name));
@@ -547,6 +658,7 @@ async function loadNodes(){
   if(tag) qs.set("tag", tag);
   if(sub) qs.set("sub_id", sub);
   const data = await api("/api/nodes" + (qs.toString() ? "?"+qs : ""));
+  setTabN("nodes", data.total);
   $("#node-count").textContent = `共 ${data.total} 个节点`;
   const real = data.nodes.filter(n => !n.filtered);
   const filtered = data.nodes.filter(n => n.filtered);
@@ -569,13 +681,15 @@ async function loadNodes(){
     const list = groups[g];
     list.sort(stabSort);   // 融合排序：稳定且干净的节点排每组最前
     const det = document.createElement("details");
-    det.open = order.length <= 12;
+    det.open = g === order[0];   // 默认只展开第一组：防长滚动，其余按需点开
     const rows = list.map(nodeRow).join("");
     det.innerHTML = `<summary>${regionZh(g || null)}（${list.length}）</summary>
       <table><thead><tr><th>名称</th><th>属性</th><th>稳定性 24h</th><th>纯净度</th><th>机场</th></tr></thead><tbody>${rows}</tbody></table>`;
     box.appendChild(det);
   }
   if(!real.length) box.innerHTML = '<div class="muted">（无节点）</div>';
+  groupsOpen = false;
+  $("#btn-toggle-groups").textContent = "展开全部分组";
 
   const fbox = $("#node-filtered-body");
   if(filtered.length){
@@ -656,12 +770,18 @@ async function loadAnomalies(){
   box.querySelector("summary").textContent = `解析异常节点（${items.length}，已跳过不入库）`;
 }
 
-/* ---------- ④ 配置产物 ---------- */
+/* ---------- ③ 配置产物 ---------- */
 let currentFmt = "clash";
+async function loadHeader(){
+  try{
+    const h = await api("/api/health");
+    const v = h.current_version;
+    $("#head-status").textContent = v ? `当前配置 v${String(v).padStart(4,"0")}` : "尚未发布配置";
+  }catch(e){ /* 保留旧文案，不打断页面 */ }
+}
 async function loadConfig(){
-  const [ver, health] = await Promise.all([api("/api/config/versions"), api("/api/health")]);
+  const ver = await api("/api/config/versions");
   const cur = ver.current;
-  $("#head-status").textContent = cur ? `当前配置 v${String(cur).padStart(4,"0")}` : "尚未发布配置";
   const curMeta = (ver.versions || []).find(v => v.version === cur);
   $("#config-summary").textContent = curMeta ? `当前 v${String(cur).padStart(4,"0")}・${curMeta.node_count ?? "?"} 节点・发布于 ${fmtTime(curMeta.created_at)}` : "尚未发布任何配置";
   // 离线包刷新提示（docs/03：离线包 N 小时未刷新）
@@ -691,7 +811,6 @@ async function loadConfig(){
   }
   $("#dl-clash-offline").href = BOOT.subUrls ? BOOT.subUrls.clashOffline : "#";
   $("#dl-sr-offline").href = BOOT.subUrls ? BOOT.subUrls.srOffline : "#";
-  await loadPreview();
 
   // 版本时间线 + 回退
   const tl = $("#version-timeline");
@@ -703,7 +822,7 @@ async function loadConfig(){
       if((d.added||[]).length) parts.push(`<span style="color:var(--ok)">+${d.added.length}</span>`);
       if((d.removed||[]).length) parts.push(`<span style="color:var(--bad)">-${d.removed.length}</span>`);
       if((d.renamed||[]).length) parts.push(`~${d.renamed.length} 改名`);
-      return `<tr${v.version===cur ? ' style="opacity:.55"' : ""}>
+      return `<tr${v.version===cur ? ' class="cur"' : ""}>
         <td class="t">v${String(v.version).padStart(4,"0")}${v.version===cur ? "（当前）" : ""}</td>
         <td class="muted" data-l="发布时间">${fmtTime(v.created_at)}</td>
         <td data-l="节点数">${v.node_count ?? "—"}</td>
@@ -722,8 +841,10 @@ async function loadConfig(){
     });
   }));
 }
+// 预览折叠懒加载：展开或切格式时才拉内容，平时不占滚动高度
 async function loadPreview(){
   const box = $("#config-preview");
+  box.textContent = "加载中…";
   try{
     const res = await fetch(`/api/config/preview?fmt=${currentFmt}`);
     if(!res.ok){
@@ -736,23 +857,15 @@ async function loadPreview(){
     box.textContent = text.length > 120000 ? text.slice(0, 120000) + "\n……（预览截断，完整内容请下载）" : text;
   }catch(e){ box.textContent = "（预览加载失败：" + e.message + "）"; }
 }
+$("#preview-wrap").addEventListener("toggle", () => { if($("#preview-wrap").open) loadPreview(); });
 document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => {
   document.querySelectorAll(".tabs button").forEach(x => x.classList.remove("on"));
   b.classList.add("on");
   currentFmt = b.dataset.fmt;
-  loadPreview();
+  if($("#preview-wrap").open) loadPreview();
 }));
 
-/* ---------- ⑤ 操作区 ---------- */
-$("#btn-refresh").addEventListener("click", (ev) => {
-  guard(ev.target, async () => {
-    const r = await api("/api/refresh", {method:"POST", body:{}});
-    if(r.published) toast(`刷新完成：配置 v${String(r.version).padStart(4,"0")}（${r.node_count} 节点，滤除 ${r.filtered_count}）`);
-    else toast("刷新完成但未发布新配置：" + ((r.errors||[]).join("；") || "沿用上一版"), true);
-    if((r.stale_subs||[]).length) toast("以下订阅抓取异常，沿用旧快照：" + r.stale_subs.join("、"), true);
-    await reload();
-  });
-});
+/* ---------- ④ 设置：运行状态 ---------- */
 async function loadOps(){
   const health = await api("/api/health");
   const rules = health.rules;
@@ -768,9 +881,23 @@ async function loadOps(){
   // 调度任务状态
   const sched = health.scheduler || {};
   const jobs = Object.entries(sched).map(([k, v]) => `${esc(k)}：${fmtTime(v.last_run)}（${esc(v.last_status || "—")}）`);
-  if(jobs.length) $("#rules-status").innerHTML += `<br><span class="muted">定时任务　${jobs.join("　")}</span>`;
+  if(jobs.length) box.innerHTML += `<br><span class="muted">定时任务　${jobs.join("　")}</span>`;
 }
+const MIRROR_PROVIDER_ZH = {"cf-kv": "CF Workers + KV（推荐）", "github": "GitHub 公库随机路径"};
+const MIRROR_FIELD_DEFS = {
+  "cf-kv": [["url_token","url_token"],["api_token","api_token"],["account_id","account_id"],["namespace_id","namespace_id"],["worker_base","worker_base"]],
+  "github": [["api_token","api_token"],["owner","owner"],["repo","repo"],["branch","branch"],["path","随机路径"]],
+};
+const MIRROR_URL_LABELS = [
+  ["clash.yaml", "Clash Verge（mihomo）"],
+  ["shadowrocket.yaml", "SR（推荐）"],
+  ["shadowrocket.conf", "SR conf（旧）"],
+  ["clash-offline.yaml", "clash 离线包"],
+  ["shadowrocket-offline.conf", "SR 离线包"],
+];
+function kvRow(label, html){ return `<div class="kv"><label>${label}</label><div>${html}</div></div>`; }
 async function loadMirror(){
+  const box = $("#mirror-overview");
   try{
     const data = await api("/api/mirror");
     const s = data.settings || {};
@@ -779,44 +906,50 @@ async function loadMirror(){
     syncMirrorFields();
     f.enabled.checked = !!s.enabled;
     mirrorCredConfigured = !!s.credentials_configured;
-    $("#mirror-cred-hint").innerHTML = mirrorCredConfigured
-      ? '<span class="ok">✓ 凭据已保存</span>（只存 NAS 本地、不回显；留空输入框 = 保持原值，要换就填新值）'
-      : "尚未配置凭据：点标题旁 ？ 查看分步教程。";
-    $("#mirror-status").innerHTML = s.enabled
-      ? `<span class="badge ok">已启用</span><span>提供方：${esc(s.provider)}</span>` +
-        (s.last_push ? `<span>上次推送：${fmtTime(s.last_push.pushed_at)}</span>` : "") +
-        (s.last_result && s.last_result.error ? `<span class="badge bad">${esc(s.last_result.error)}</span>` : "")
-      : '<span class="muted">未启用。填写凭据并保存后，产物变化会自动推送到公网镜像。</span>';
-    // 公网订阅链接：GET /api/mirror 回显 last_push.urls（不回显任何凭据）
-    const linksBox = $("#mirror-links");
-    linksBox.innerHTML = "";
-    const mirrorUrls = (s.last_push && s.last_push.urls) || s.urls || {};
-    const mirrorLabels = [
-      ["clash.yaml", "Clash Verge（mihomo）"],
-      ["shadowrocket.yaml", "SR（推荐）"],
-      ["shadowrocket.conf", "SR conf（旧）"],
-      ["clash-offline.yaml", "clash 离线包"],
-      ["shadowrocket-offline.conf", "SR 离线包"],
-    ];
-    if(s.enabled && Object.keys(mirrorUrls).length){
-      linksBox.innerHTML = '<p class="mirror-hint"><span class="ok">公网订阅地址（外网客户端直接填）：</span></p>';
-      for(const [key, label] of mirrorLabels){
-        const url = mirrorUrls[key];
-        if(!url) continue;
-        const row = document.createElement("div");
-        row.className = "linkrow";
-        row.innerHTML = `<span class="muted" style="width:150px">${esc(label)}</span><input readonly value="${esc(url)}"><button class="copy">复制</button>`;
-        row.querySelector("input").addEventListener("focus", e => e.target.select());
-        row.querySelector("button").addEventListener("click", async () => {
-          if(await copyText(url)) toast("链接已复制");
-          else { row.querySelector("input").select(); toast("复制失败，请选中后按 Ctrl+C", true); }
-        });
-        linksBox.appendChild(row);
-      }
-    } else if(s.enabled && s.credentials_configured){
-      linksBox.innerHTML = '<p class="mirror-hint">尚未推送：点「保存并立即试推」立即生成公网地址，之后产物变化时自动推送。</p>';
+    // 未配置时展开表单引导填写；已配置时收起，由概览面板承载已保存信息
+    $("#mirror-form-wrap").open = !mirrorCredConfigured;
+    $("#mirror-form-summary").textContent = mirrorCredConfigured ? "修改设置与凭据" : "填写设置与凭据";
+
+    const lp = s.last_push || {};
+    const lr = s.last_result || {};
+    const rows = [];
+    rows.push(kvRow("提供方", esc(MIRROR_PROVIDER_ZH[s.provider] || s.provider || "—")));
+    if(s.enabled){
+      const syncHtml = '<span class="badge ok">已启用</span>' +
+        (lp.pushed_at ? ` <span class="muted">上次推送 ${fmtTime(lp.pushed_at)}</span>` : "");
+      rows.push(kvRow("同步", syncHtml));
+    }else{
+      rows.push(kvRow("同步", '<span class="badge">未启用</span> <span class="muted">在下方勾选启用并保存后，产物变化自动推送</span>'));
     }
-  }catch(e){ $("#mirror-status").innerHTML = `<span class="muted">镜像模块状态不可用：${esc(e.message)}</span>`; }
+    // 已存凭据：只报哪些项已保存（布尔），值一律不回显
+    if(mirrorCredConfigured){
+      const state = (s.credentials_fields || {})[s.provider] || {};
+      const chips = (MIRROR_FIELD_DEFS[s.provider] || []).map(([k, label]) =>
+        state[k] ? `<span class="chip on" title="已保存">✓ ${esc(label)}</span>`
+                 : `<span class="chip off" title="未保存（推送会因配置不完整而失败）">✗ ${esc(label)}</span>`).join("");
+      const upd = s.updated_at ? `<span class="sub muted">更新于 ${fmtTime(s.updated_at)}</span>` : "";
+      rows.push(kvRow("已存凭据", `<div class="chips">${chips}</div>${upd}`));
+    }else{
+      rows.push(kvRow("已存凭据", '<span class="muted">未配置 —— 在下方填好并「保存并立即试推」即完成配置</span>'));
+    }
+    if(lr.ok === false && lr.error){
+      rows.push(kvRow("最近推送", `<span class="badge bad">推送失败</span> <span class="muted">${esc(lr.error)}（${fmtTime(lr.at)}）</span>`));
+    }
+    // 公网订阅地址：URL 中本就携带 url_token，属可复制信息而非凭据回显
+    const urls = lp.urls || {};
+    const links = MIRROR_URL_LABELS.filter(([k]) => urls[k])
+      .map(([k, label]) => `<div class="linkrow"><span class="muted">${esc(label)}</span><input readonly value="${esc(urls[k])}"><button class="copy" data-url="${esc(urls[k])}">复制</button></div>`).join("");
+    if(s.enabled && links){
+      rows.push(kvRow("公网订阅地址", `<span class="muted sub">外网客户端直接填（含 token，勿外传）：</span>${links}`));
+    }else if(s.enabled && mirrorCredConfigured){
+      rows.push(kvRow("公网订阅地址", '<span class="muted">尚未推送成功：点下方「保存并立即试推」生成地址</span>'));
+    }
+    box.innerHTML = rows.join("");
+    box.querySelectorAll(".linkrow button.copy").forEach(b => b.addEventListener("click", async () => {
+      if(await copyText(b.dataset.url)) toast("链接已复制");
+      else { b.previousElementSibling.select(); toast("复制失败，请选中后按 Ctrl+C", true); }
+    }));
+  }catch(e){ box.innerHTML = `<div class="muted">镜像模块状态不可用：${esc(e.message)}</div>`; }
 }
 // 提供方切换 → 显示对应输入框组；凭据分字段填写（留空 = 保持服务端已存值）
 function syncMirrorFields(){
@@ -864,13 +997,15 @@ document.addEventListener("keydown", (ev) => {
 });
 
 async function reload(){
-  // 先拉稳定性 + 纯净度上下文（节点总表融合渲染依赖），再并行刷新其余板块
-  await loadContexts().catch(() => {});
-  await Promise.allSettled([loadSubs(), loadNodes(), loadAnomalies(), loadConfig(), loadOps(), loadMirror()]);
+  // 页头版本 + 订阅卡（订阅下拉供节点页筛选用）先刷，再刷当前页签
+  await Promise.allSettled([loadHeader(), loadSubs()]);
+  if(currentTab === "subs") return;   // 订阅卡已在上方刷新
+  await loadTab(currentTab);
 }
+switchTab((location.hash || "").replace(/^#/, "") || "subs");
 reload();
-// 稳定性/纯净度上下文轻量自刷：只重拉两路数据并重渲节点总表
-setInterval(() => loadContexts().then(loadNodes).catch(() => {}), 5 * 60 * 1000);
+// 稳定性/纯净度上下文轻量自刷：仅在节点页签激活时重拉并重渲
+setInterval(() => { if(currentTab === "nodes") loadContexts().then(loadNodes).catch(() => {}); }, 5 * 60 * 1000);
 </script>
 </body>
 </html>

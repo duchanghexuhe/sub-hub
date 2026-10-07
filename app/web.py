@@ -375,21 +375,29 @@ def _provider_settings_key(provider: str | None) -> str | None:
 
 
 def _sanitize_mirror_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
-    """镜像设置对外形态：凭据只报「已配置」，绝不回显内容。
+    """镜像设置对外形态：凭据只报「是否已保存」，绝不回显内容。
 
     mirror 模块的提供方凭据存放在 settings["cf_kv"] / settings["github"] 子字典
-    （含 api_token 等敏感字段），与历史遗留的 settings["credentials"] 一并隐藏。
+    （含 api_token 等敏感字段），与历史遗留的 settings["credentials"] 一并隐藏；
+    另输出 credentials_fields（逐字段布尔，供 UI 显示「哪些项已保存」）。
     """
     source = settings or {}
     s = dict(source)
     legacy_posted = bool(s.pop("credentials", None))
-    for key in ("cf_kv", "github"):
-        s.pop(key, None)
+    # 以提供方 id（cf-kv / github）为键，与响应中 provider 字段直接对应
+    field_state: dict[str, dict[str, bool]] = {}
+    for prov, key in (("cf-kv", "cf_kv"), ("github", "github")):
+        sub = source.get(key)
+        if isinstance(sub, dict):
+            field_state[prov] = {str(k): bool(str(v or "").strip()) for k, v in sub.items()}
+    s.pop("cf_kv", None)
+    s.pop("github", None)
     sub = source.get(_provider_settings_key(source.get("provider")))  # type: ignore[arg-type]
     configured = legacy_posted or (
         isinstance(sub, dict) and any(str(v or "").strip() for v in sub.values())
     )
     s["credentials_configured"] = configured
+    s["credentials_fields"] = field_state
     return s
 
 
