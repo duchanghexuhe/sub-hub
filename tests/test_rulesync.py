@@ -42,14 +42,17 @@ DOCS_CLAUDE_DOMAINS = [
     "anthropic.com",
 ]
 
-# docs/02 §3 规则链顺序（manifest 列表顺序不得重排）
+# docs/02 §3 规则链顺序（manifest 列表顺序不得重排）；gemini-extra/snssdk-direct
+# 为 2026-10-09 校准新增的自维护补丁，各置于其要修正的上游集之前
 EXPECTED_CHAIN = [
     "claude-extra", "futu-extra",
-    "steam-download", "steam-extra", "mteam-tracker", "mteam-web",
-    "Claude", "OpenAI", "Gemini", "Copilot",
+    "steam-download", "steam-extra", "direct-fix", "mteam-tracker", "mteam-web",
+    "Claude", "OpenAI", "gemini-extra", "Gemini", "Copilot",
     "Grok", "Perplexity", "CursorAI", "AI",
     "telegram-extra", "Telegram", "Twitter",
-    "Netflix", "Disney", "YouTube", "Spotify", "TikTok", "PrimeVideo",
+    "Netflix", "Disney", "YouTube", "Spotify", "snssdk-direct", "TikTok", "PrimeVideo",
+    "helldivers-extra",
+    "Epic", "Riot", "Blizzard", "EA", "Origin", "Ubisoft", "PlayStation", "Xbox", "Nintendo",
     "GitHub", "Google", "Microsoft", "Apple",
     "Global", "ProxyGFWlist", "ChinaMax", "CNCIDR", "Lan", "Download",
 ]

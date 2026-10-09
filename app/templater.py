@@ -32,7 +32,7 @@ import yaml
 from jinja2 import Environment, FileSystemLoader
 
 from app.config import AppConfig
-from app.models import Node, PurityResult
+from app.models import GhSpeedSample, Node, PurityResult
 
 logger = logging.getLogger("subhub.templater")
 
@@ -62,6 +62,8 @@ G_DISNEY = "🏰 Disney+"
 G_YOUTUBE = "📺 YouTube"
 G_SPOTIFY = "🎵 Spotify"
 G_GOOGLE = "📢 谷歌服务"
+G_GITHUB = "🐱 GitHub"
+G_GITHUB_FAST = "🏆 GitHub 优选"
 G_MICROSOFT = "Ⓜ️ 微软服务"
 G_APPLE = "🍎 苹果服务"
 G_GAME = "🎮 游戏平台"
@@ -76,7 +78,7 @@ FIXED_GROUP_ORDER: tuple[str, ...] = (
     G_MAIN, G_AUTO, G_US, G_CLAUDE, G_CLAUDE_BACKUP,
     G_OPENAI, G_GEMINI, G_COPILOT, G_AI, G_TG,
     G_NETFLIX, G_DISNEY, G_YOUTUBE, G_SPOTIFY,
-    G_GOOGLE, G_MICROSOFT, G_APPLE, G_GAME, G_FINAL,
+    G_GOOGLE, G_MICROSOFT, G_APPLE, G_GITHUB, G_GAME, G_FINAL,
 )
 
 # 未识别地区节点的归属组（docs/02 §1：不会丢失）
@@ -136,6 +138,7 @@ class RuleEntry:
     behavior: str        # domain / ipcidr / classical
     clash_file: str      # mihomo 缓存文件名（<name>.yaml）
     sr_file: str         # SR 缓存文件名（<name>.list）
+    processes: tuple[str, ...] = ()   # 进程钉组：仅 Clash 系产物（SR 无进程概念）
 
 
 def load_rules_manifest(path: Path | None = None) -> list[RuleEntry]:
@@ -153,6 +156,9 @@ def load_rules_manifest(path: Path | None = None) -> list[RuleEntry]:
                     behavior=str(item["behavior"]),
                     clash_file=str(item["clash_file"]),
                     sr_file=str(item["sr_file"]),
+                    processes=tuple(
+                        str(p).strip() for p in (item.get("processes") or []) if str(p).strip()
+                    ),
                 )
             )
         except KeyError as exc:
@@ -274,6 +280,11 @@ def _stability_map(stability: list[dict] | None) -> dict[tuple[str, str], dict]:
     return {(s["source_sub"], s["node_name"]): s for s in stability or []}
 
 
+def _gh_speed_map(gh_speed: list[GhSpeedSample] | None) -> dict[tuple[str, str], GhSpeedSample]:
+    """GitHub 吞吐量采样按 (source_sub, node_name) 索引（键语义同 _purity_map）。"""
+    return {(g.source_sub, g.node_name): g for g in gh_speed or []}
+
+
 _BIG_DELAY = 1 << 30
 
 
@@ -368,6 +379,7 @@ def _claude_pool(real: list[Node], purity: list[PurityResult] | None) -> list[No
 def build_groups(nodes: list[Node], *, config: AppConfig,
                  purity: list[PurityResult] | None = None,
                  stability: list[dict] | None = None,
+                 gh_speed: list[GhSpeedSample] | None = None,
                  region_presence_nodes: list[Node] | None = None) -> list[dict]:
     """按 docs/02 §2 计算全部 proxy-groups，返回 mihomo 原生 dict 结构。
 
@@ -376,6 +388,9 @@ def build_groups(nodes: list[Node], *, config: AppConfig,
       全量节点，保证两格式组集合一致（某地区在 SR 可见集为空时成员回退 [♻️ 常规自动]）；
     - 美国系组（⛳ 美国优质 / 🎁 / 🤖 / 🐙）恒生成，无美国可见节点时成员回退
       [♻️ 常规自动]，避免空 url-test 组导致 mihomo 拒载；
+    - 🐱 GitHub 恒生成；有 gh_speed 测速数据时追加 🏆 GitHub 优选（fallback，实测
+      最快 top-N 存活节点）并按速度重排 🐱 成员（首位=优选组即默认出口），无数据时
+      成员为 [♻️ 常规自动, 🚀 节点选择, 各地区组, 全量裸节点]；
     - ♻️ 常规自动只收低倍率：成员为倍率 ≤ max(config.auto_max_rate, 全库最低倍率)
       的节点（省流：常规流量不走高价档；全库无达标倍率时阈值自动放宽到最低档）；
     - purity：纯净度结果（可为空）。有数据时 Claude 专用/备援只收 claude_rank ≥
@@ -451,9 +466,44 @@ def build_groups(nodes: list[Node], *, config: AppConfig,
     for name in (G_MICROSOFT, G_APPLE):
         groups.append({"name": name, "type": "select",
                        "proxies": ["DIRECT", G_AUTO, G_MAIN, *region_names]})
-    # 12. 🎮 游戏平台（默认 DIRECT）
+    # 11.5 🐱 GitHub 专属出口 + 🏆 GitHub 优选：GitHub/ghcr 流量不混入谷歌服务组。
+    # Fastly 对机场出口的吞吐量限速与谷歌路径无关、且按出口区分——url-test 按延迟
+    # 选路恰好偏爱低延迟的被限速出口（2026-10-07 实测吞吐量差 270 倍）。有测速数据
+    # （ghspeed.sweep 定时落库）时：🏆 优选 fallback 组收实测最快 top-N 存活节点
+    # （首位存活者即最快，死亡自动顺延次快），🐱 组首位=优选组即默认出口、其余节点
+    # 按实测速度降序（未测/失败按原序其后，判死沉底），随配置下发客户机零依赖；
+    # 无数据时维持基础形状（默认 ♻️ 常规自动）。不给 DIRECT：GitHub 直连必挂。
+    gmap = _gh_speed_map(gh_speed)
+    alive_gh = [n for n in real if n.name in set(alive_names)]
+    down_gh = [n for n in real if n.name not in set(alive_names)]
+    measured = [n for n in alive_gh
+                if (gs := gmap.get((n.source_sub, n.name))) is not None
+                and gs.speed_mbps is not None]
+    measured.sort(key=lambda n: -(gmap[(n.source_sub, n.name)].speed_mbps or 0.0))
+    measured_keys = {(n.source_sub, n.name) for n in measured}
+    unmeasured = [n for n in alive_gh if (n.source_sub, n.name) not in measured_keys]
+    fast_members = [n.name for n in measured[:max(config.ghprobe_top_n, 1)]]
+    if fast_members:
+        groups.append({
+            "name": G_GITHUB_FAST, "type": "fallback",
+            "proxies": list(fast_members),
+            "url": PROBE_URL, "interval": HEALTH_INTERVAL,
+            "tolerance": HEALTH_TOLERANCE, "max-failed-times": HEALTH_MAX_FAILED,
+            "timeout": HEALTH_TIMEOUT, "lazy": False,
+        })
+        groups.append({"name": G_GITHUB, "type": "select",
+                       "proxies": [G_GITHUB_FAST, G_AUTO, G_MAIN, *region_names,
+                                   *[n.name for n in measured],
+                                   *[n.name for n in unmeasured],
+                                   *[n.name for n in down_gh]]})
+    else:
+        groups.append({"name": G_GITHUB, "type": "select",
+                       "proxies": [G_AUTO, G_MAIN, *region_names, *all_names]})
+    # 12. 🎮 游戏平台（默认 DIRECT）。裸节点全量追加是游戏场景的硬需求：
+    # 地区组是 url-test 自动换节点（interval 120s/tolerance 40ms），游戏中途
+    # 切换=掉线重连；要钉死单节点必须能直接选中裸节点（2026-10-09 用户实测反馈）
     groups.append({"name": G_GAME, "type": "select",
-                   "proxies": ["DIRECT", G_AUTO, G_MAIN, *region_names]})
+                   "proxies": ["DIRECT", G_AUTO, G_MAIN, *region_names, *all_names]})
     # 13. 🐟 漏网之鱼（MATCH 落点）：默认 DIRECT——兜底语义「国内优先」（2026-09-29 实测
     # 校准：富途行情裸 IP / 国内长尾落鱼走代理会被判境外发延迟行情；推特视频、TG 视频等
     # 该代理流量由规则链显式归组，鱼组只收真正的长尾。可手动切 🚀 恢复全代理模式）
@@ -469,19 +519,39 @@ LAN_GUARD_RULES: tuple[str, ...] = (
     "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
     "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
     "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+    "IP-CIDR,169.254.0.0/16,DIRECT,no-resolve",   # 链路本地（DHCP 失败自配地址）
+    "IP-CIDR,0.0.0.0/8,DIRECT,no-resolve",        # 未指定地址（本机语义）
+    "IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",    # CGNAT 运营商级 NAT 段
+    "IP-CIDR,224.0.0.0/4,DIRECT,no-resolve",      # IPv4 组播
+    "IP-CIDR6,::1/128,DIRECT,no-resolve",         # IPv6 环回
+    "IP-CIDR6,fe80::/10,DIRECT,no-resolve",       # IPv6 链路本地
+    "IP-CIDR6,fc00::/7,DIRECT,no-resolve",        # IPv6 ULA 局域网（NAS 可能配 ULA）
+    "IP-CIDR6,ff00::/8,DIRECT,no-resolve",        # IPv6 组播
 )
 """规则链最前端的内建 LAN 直连护栏。
 
 mihomo 拉取 rule-provider 的请求同样经过规则引擎：内核启动时若规则集尚未加载，
 该请求会落 MATCH 走代理出去，机场侧无法回源内网 IP（NAS），拉取失败且要等
 interval 才重试——全部规则集空转一整天（2026-09-28 claude.com 落漏网之鱼实测）。
-内建静态 IP-CIDR 规则不依赖任何 provider，从根上断掉该死锁；no-resolve 使
-域名连接跳过匹配，仅裸 IP 命中。SR [Rule] 段同样前置。"""
+内建静态 IP-CIDR/IP-CIDR6 规则不依赖任何 provider，从根上断掉该死锁；
+no-resolve 使域名连接跳过匹配，仅裸 IP 命中。SR [Rule] 段同样前置。"""
+
+
+def _process_pin_rules(rules: list[RuleEntry]) -> list[str]:
+    """清单 processes 字段 → PROCESS-NAME 规则行（仅 Clash 系产物，SR 端跳过）。
+
+    进程规则无域名/IP 可匹配，用于把游戏进程的全部流量（联机 API + P2P 裸 IP
+    UDP）一锅端归组；iOS 端无进程概念且不认此类型（同 Download 集先例：进程行
+    只存在于 Clash 端），必须只进 Clash 链。挂在全部 RULE-SET 之后、MATCH 之前：
+    CNCIDR 先把国内 IP 吃掉直连，进程规则只接走境外长尾。
+    """
+    return [f"PROCESS-NAME,{p},{e.policy}" for e in rules for p in e.processes]
 
 
 def _clash_rule_lines(rules: list[RuleEntry]) -> list[str]:
-    """mihomo rules 列表：RULE-SET,<名>,<组> 按清单顺序 + MATCH 落漏网之鱼。"""
+    """mihomo rules 列表：RULE-SET,<名>,<组> 按清单顺序 + 进程钉组 + MATCH 落漏网之鱼。"""
     lines = [*LAN_GUARD_RULES, *(f"RULE-SET,{e.name},{e.policy}" for e in rules)]
+    lines.extend(_process_pin_rules(rules))
     lines.append(f"MATCH,{G_FINAL}")
     return lines
 
@@ -537,8 +607,9 @@ def _manifest_builtin_payload(rule_name: str) -> list[str]:
     """从清单里取自维护条目的 domains/ips，规范成 TYPE,value 行（离线兜底）。
 
     mihomo classical inline payload 要求显式前缀（DOMAIN-SUFFIX,x），
-    裸域名行会坏掉整个 provider，这里不回退裸形态；IP-CIDR 行不带 no-resolve，
-    SR 端由 _payload_line_to_sr_rule 原样追加策略。增删条目只改 rules_manifest.yaml。
+    裸域名行会坏掉整个 provider，这里不回退裸形态；IP-CIDR/IP-CIDR6 行不带
+    no-resolve，SR 端由 _payload_line_to_sr_rule 原样追加策略（IPv6 段必须
+    输出 IP-CIDR6，IP-CIDR 不匹配 v6 目标）。增删条目只改 rules_manifest.yaml。
     """
     try:
         doc = yaml.safe_load(DEFAULT_MANIFEST_PATH.read_text(encoding="utf-8")) or {}
@@ -549,7 +620,12 @@ def _manifest_builtin_payload(rule_name: str) -> list[str]:
             domains = item.get("domains") if isinstance(item.get("domains"), list) else []
             ips = item.get("ips") if isinstance(item.get("ips"), list) else []
             lines = [f"DOMAIN-SUFFIX,{str(d).strip()}" for d in domains if str(d).strip()]
-            lines += [f"IP-CIDR,{str(i).strip()}" for i in ips if str(i).strip()]
+            for i in ips:
+                cidr = str(i).strip()
+                if not cidr:
+                    continue
+                kind = "IP-CIDR6" if ":" in cidr else "IP-CIDR"
+                lines.append(f"{kind},{cidr}")
             return lines
     return []
 
@@ -567,12 +643,29 @@ def _inline_payload(entry: RuleEntry, config: AppConfig) -> list[str]:
 
 
 def _payload_line_to_sr_rule(line: str, policy: str) -> str:
-    """.list 缓存行 / payload 行 → 完整 SR 规则（补全前缀与策略）。"""
+    """.list 缓存行 / payload 行 → 完整 SR 规则（按行形态补全类型前缀与策略）。
+
+    旧实现对无逗号行一律补 DOMAIN-SUFFIX：domain 集 payload 的 `+.` 列表语法
+    （`+.` 是列表后缀语法而非 DOMAIN-SUFFIX 值语法）与 CNCIDR 的裸 IPv6 段
+    展开后不匹配任何主机，ChinaMax/Global/CNCIDR 三层在 SR 端整层失效
+    （2026-10-09 实测 146,038 条死行 + 3,446 条垃圾行）。分支语义：
+    - 含逗号：已是规则片段（DOMAIN-SUFFIX,x / IP-CIDR,x/24,no-resolve），原样补策略；
+    - `+.` / 前导 `.`：规则集列表后缀行 → DOMAIN-SUFFIX（去前缀）；
+    - 裸 CIDR 含冒号 → IP-CIDR6（SR 语法 IPv6 段必须用 IP-CIDR6）；
+    - 裸 IPv4 CIDR → IP-CIDR；
+    - 其余裸域 → DOMAIN（精确匹配，与 mihomo domain 行为的裸域语义一致，不放宽为 SUFFIX）。
+    """
     if "," in line:            # 已是规则片段（DOMAIN-SUFFIX,x / IP-CIDR,x/24,no-resolve）
         return f"{line},{policy}"
-    if re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}/\d{1,2}", line):  # 裸 CIDR
+    if line.startswith("+."):
+        return f"DOMAIN-SUFFIX,{line[2:]},{policy}"
+    if line.startswith("."):   # SR .list 的后缀行写法（.example.com）
+        return f"DOMAIN-SUFFIX,{line[1:]},{policy}"
+    if re.fullmatch(r"[0-9a-fA-F:]+/\d{1,3}", line):          # 裸 CIDR 含冒号 = IPv6
+        return f"IP-CIDR6,{line},{policy}"
+    if re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}/\d{1,2}", line):  # 裸 IPv4 CIDR
         return f"IP-CIDR,{line},{policy}"
-    return f"DOMAIN-SUFFIX,{line},{policy}"  # 裸域名（domain 行为）
+    return f"DOMAIN,{line},{policy}"  # 裸域名（domain 行为的精确匹配语义）
 
 
 def _sr_rule_lines(rules: list[RuleEntry], config: AppConfig, *, offline: bool) -> list[str]:
@@ -598,7 +691,8 @@ def _sr_yaml_rule_lines(rules: list[RuleEntry], config: AppConfig) -> list[str]:
 
 def render_sr_yaml(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
                    purity: list[PurityResult] | None = None,
-                   stability: list[dict] | None = None) -> str:
+                   stability: list[dict] | None = None,
+                   gh_speed: list[GhSpeedSample] | None = None) -> str:
     """渲染 SR 专用 YAML（Clash 兼容格式，规则全内联）。
 
     SR 原生 conf 无法表达 VLESS REALITY（公钥/短 ID 参数被解析器静默丢弃），
@@ -609,7 +703,7 @@ def render_sr_yaml(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntr
     real = _real_nodes(nodes)
     sr_nodes, skipped_anytls, _ = _prepare_sr_nodes(real, config)
     groups = build_groups(sr_nodes, config=config, purity=purity, stability=stability,
-                          region_presence_nodes=real)
+                          gh_speed=gh_speed, region_presence_nodes=real)
     template = _env.get_template("sr.yaml.j2")
     return template.render(
         variant_label="规则全内联",
@@ -744,10 +838,12 @@ def _sr_group_line(group: dict[str, Any]) -> str:
 
 def render_clash(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
                  offline: bool = False, purity: list[PurityResult] | None = None,
-                 stability: list[dict] | None = None) -> str:
+                 stability: list[dict] | None = None,
+                 gh_speed: list[GhSpeedSample] | None = None) -> str:
     """渲染 mihomo（Clash Verge）YAML。offline=True 时规则内联（离线自包含版）。"""
     real = _real_nodes(nodes)
-    groups = build_groups(real, config=config, purity=purity, stability=stability)
+    groups = build_groups(real, config=config, purity=purity, stability=stability,
+                          gh_speed=gh_speed)
     proxies = [n.to_clash_proxy() for n in real]
     providers = _build_rule_providers(rules, config, offline=offline)
     template = _env.get_template("clash.yaml.j2")
@@ -766,7 +862,8 @@ def render_clash(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry]
 
 def render_sr_conf(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
                    offline: bool = False, purity: list[PurityResult] | None = None,
-                   stability: list[dict] | None = None) -> str:
+                   stability: list[dict] | None = None,
+                   gh_speed: list[GhSpeedSample] | None = None) -> str:
     """渲染 Shadowrocket conf。offline=True 时 .list 内容展开进 [Rule]。
 
     组与 mihomo 同名同语义：分组结构按全量节点判定（region_presence_nodes），
@@ -775,7 +872,7 @@ def render_sr_conf(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntr
     real = _real_nodes(nodes)
     sr_nodes, skipped_anytls, _ = _prepare_sr_nodes(real, config)
     groups = build_groups(sr_nodes, config=config, purity=purity, stability=stability,
-                          region_presence_nodes=real)
+                          gh_speed=gh_speed, region_presence_nodes=real)
     proxy_lines = [line for line in (_sr_proxy_line(n) for n in sr_nodes) if line]
     template = _env.get_template("sr.conf.j2")
     return template.render(
@@ -793,11 +890,13 @@ def render_sr_conf(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntr
 
 def render_all(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
                purity: list[PurityResult] | None = None,
-               stability: list[dict] | None = None) -> RenderResult:
+               stability: list[dict] | None = None,
+               gh_speed: list[GhSpeedSample] | None = None) -> RenderResult:
     """一次渲染五份产物 + 统计（pipeline 推荐入口）。"""
     real = _real_nodes(nodes)
     sr_nodes, skipped_anytls, skipped_other = _prepare_sr_nodes(real, config)
-    groups = build_groups(real, config=config, purity=purity, stability=stability)
+    groups = build_groups(real, config=config, purity=purity, stability=stability,
+                          gh_speed=gh_speed)
     region_names = [region_group_name(c)
                     for c in _ordered_present_regions({n.region for n in real})]
     stats = RenderStats(
@@ -811,14 +910,14 @@ def render_all(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
                 stats.node_count, stats.group_count, stats.sr_skipped_anytls)
     return RenderResult(
         clash_yaml=render_clash(real, config=config, rules=rules, offline=False,
-                                purity=purity, stability=stability),
+                                purity=purity, stability=stability, gh_speed=gh_speed),
         sr_conf=render_sr_conf(real, config=config, rules=rules, offline=False,
-                               purity=purity, stability=stability),
+                               purity=purity, stability=stability, gh_speed=gh_speed),
         sr_yaml=render_sr_yaml(real, config=config, rules=rules,
-                               purity=purity, stability=stability),
+                               purity=purity, stability=stability, gh_speed=gh_speed),
         clash_offline_yaml=render_clash(real, config=config, rules=rules, offline=True,
-                                        purity=purity, stability=stability),
+                                        purity=purity, stability=stability, gh_speed=gh_speed),
         sr_offline_conf=render_sr_conf(real, config=config, rules=rules, offline=True,
-                                       purity=purity, stability=stability),
+                                       purity=purity, stability=stability, gh_speed=gh_speed),
         stats=stats,
     )

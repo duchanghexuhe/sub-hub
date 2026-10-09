@@ -156,8 +156,8 @@ def prune_versions(out_dir: Path, *, keep: int = 5) -> list[int]
 
 - `manifest_version: 1`；`sources`：blackmatrix7 Clash/SR 双格式 URL 模板、Loyalsoldier txt 模板、`builtin`（自维护 claude-extra）。
 - `rules`：**列表顺序即规则链顺序**（docs/02 §3）。每项字段：`name/category/source/upstream_file/clash_file/sr_file/policy/behavior`，
-  claude-extra 额外带 `domains` 列表（自维护域名钉死）。policy 里 TikTok/PrimeVideo/GitHub 落 `🚀 节点选择`/`📢 谷歌服务`
-  （组清单无专属组，已在 manifest 注释说明）。
+  claude-extra 额外带 `domains` 列表（自维护域名钉死）。policy 里 TikTok/PrimeVideo 落 `🚀 节点选择`、GitHub 落 `🐱 GitHub`
+  （2026-10-07 拆专属组：成员含全量裸节点，供 scripts/gh_probe.py 吞吐量优选钉选）。
 
 ### 2.6 tests/（已就绪）
 
@@ -244,6 +244,7 @@ def disambiguate(nodes: list[Node]) -> list[Node]        # 跨订阅同名：nam
 class RuleEntry:                       # rules_manifest.yaml 单项的内存形态
     name: str; category: str; policy: str; behavior: str
     clash_file: str; sr_file: str
+    processes: tuple[str, ...] = ()    # 进程钉组：仅进 Clash 系产物规则链尾（MATCH 前），SR 端跳过
 
 def load_rules_manifest(path: Path | None = None) -> list[RuleEntry]
     # 默认读仓库根 rules_manifest.yaml，按文件顺序返回
@@ -251,6 +252,7 @@ def load_rules_manifest(path: Path | None = None) -> list[RuleEntry]
 def build_groups(nodes: list[Node], *, config: AppConfig,
                  purity: list[PurityResult] | None = None,
                  stability: list[dict] | None = None,
+                 gh_speed: list[GhSpeedSample] | None = None,
                  region_presence_nodes: list[Node] | None = None) -> list[dict]
     # docs/02 §2 组清单：无节点的地区组不生成；返回 mihomo proxy-groups 原生 dict 结构
     # 测速参数统一：url=http://cp.cloudflare.com/generate_204, interval=120, tolerance=40,
@@ -258,16 +260,21 @@ def build_groups(nodes: list[Node], *, config: AppConfig,
     # purity：Claude 专用/备援准入（claude_rank≥3）与「评分降序、住宅恒在机房前」排序
     # stability：health.stability_index 摘要 dict 列表——判死节点从 url-test 组剔除
     # （组清空回退原成员）、Claude 组同评分内存活优先/判死沉底；无数据时行为不变
+    # gh_speed：ghspeed.sweep 最新一轮吞吐量样本——有数据时生成 🏆 GitHub 优选
+    # （fallback，实测最快 top-N 存活节点）并重排 🐱 GitHub 成员（首位=优选组）；
+    # 无数据时 GitHub 组维持基础形状
 
 def render_clash(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
                  offline: bool = False, purity: list[PurityResult] | None = None,
-                 stability: list[dict] | None = None) -> str
+                 stability: list[dict] | None = None,
+                 gh_speed: list[GhSpeedSample] | None = None) -> str
     # 主版本 rule-providers 指 http://<nas>:8399/rules/<clash_file>；offline=True 时
     # type: inline + payload 内联（data/rules/ 现有内容）。全局段按 docs/02 §4。
 
 def render_sr_conf(nodes: list[Node], *, config: AppConfig, rules: list[RuleEntry],
                    offline: bool = False, purity: list[PurityResult] | None = None,
-                   stability: list[dict] | None = None) -> str
+                   stability: list[dict] | None = None,
+                   gh_speed: list[GhSpeedSample] | None = None) -> str
     # [Proxy] [Proxy Group] [Rule] 三段；组与 mihomo 同名同语义；
     # config.skip_anytls=True 时跳过 anytls 节点（参数默认开）。
     # offline=True 时 .list 内容直接展开进 [Rule]。
@@ -501,7 +508,7 @@ data/
 2. **探测实例选节点方式**：probe 配置内置一个 selector 组（如 `PROBE`），purity 通过 `ProbeInstance.select()`
    切换出口后经同一 mixed 端口发请求（mihomo 单实例无法按请求指定节点）。
 3. **无专属组的规则集落点**：TikTok/PrimeVideo → `🚀 节点选择`；Grok/Perplexity/CursorAI → `🧠 通用 AI`；
-   GitHub → `📢 谷歌服务`（均与 rules_manifest.yaml 的 policy 一致）。
+   GitHub → `🐱 GitHub`（均与 rules_manifest.yaml 的 policy 一致）。
 4. **发布原子性**：版本目录内单文件用 utils 原子写；整批以「新目录先写完、meta.json 最后写」为发布点。
 5. **纯净度结果键**：`(node_name, source_sub)`，node_name 为消歧后最终名；节点改名视为新节点重新检测。
 6. **增删订阅后的 userinfo 头**：分发端点把各启用订阅 userinfo 的 upload/download 求和、total/expire 取最小非零值。

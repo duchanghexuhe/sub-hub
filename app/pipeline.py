@@ -484,27 +484,33 @@ def _render_artifacts(config: AppConfig, store: Store, nodes: list[Node]) -> dic
     稳定性数据回灌：读取 24h 健康采样摘要传入渲染，自动选路组剔除连续
     失败判死的节点、Claude 组同评分内存活优先——纯净度 + 稳定性共同驱动
     策略，无需人工挑选；无采样数据时渲染行为不变。
+    GitHub 吞吐量数据回灌：读取最新一轮 ghspeed 扫描结果传入渲染，驱动
+    🐱 GitHub 组生成 🏆 GitHub 优选（fallback）并按实测速度重排成员；
+    无测速数据时 GitHub 组维持基础形状。
     """
     templater = _import_stage("templater")
     rules = templater.load_rules_manifest()
     purity = store.latest_purity_results()
     stability = _stability_for_render(store)
+    gh_speed = store.latest_gh_speed_samples()
     return {
         "clash.yaml": templater.render_clash(nodes, config=config, rules=rules,
                                              offline=False, purity=purity,
-                                             stability=stability),
+                                             stability=stability, gh_speed=gh_speed),
         "shadowrocket.conf": templater.render_sr_conf(nodes, config=config, rules=rules,
                                                       offline=False, purity=purity,
-                                                      stability=stability),
+                                                      stability=stability, gh_speed=gh_speed),
         "shadowrocket.yaml": templater.render_sr_yaml(nodes, config=config, rules=rules,
-                                                      purity=purity, stability=stability),
+                                                      purity=purity, stability=stability,
+                                                      gh_speed=gh_speed),
         "clash-offline.yaml": templater.render_clash(nodes, config=config, rules=rules,
                                                      offline=True, purity=purity,
-                                                     stability=stability),
+                                                     stability=stability, gh_speed=gh_speed),
         "shadowrocket-offline.conf": templater.render_sr_conf(nodes, config=config,
                                                               rules=rules, offline=True,
                                                               purity=purity,
-                                                              stability=stability),
+                                                              stability=stability,
+                                                              gh_speed=gh_speed),
     }
 
 

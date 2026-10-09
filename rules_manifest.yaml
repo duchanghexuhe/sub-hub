@@ -14,6 +14,8 @@
 #   sr_file     SR 格式缓存文件名（.list）
 #   policy      规则链中该规则集的出口组（组名以 docs/02 §2 为准）或 DIRECT
 #   behavior    mihomo rule-providers 行为：domain / ipcidr / classical
+#   processes   可选：进程钉组（PROCESS-NAME），仅进 Clash 系产物规则链尾
+#               （MATCH 前）；SR 端无进程概念，自动跳过
 #   note        转换/兜底说明
 # 列表顺序即规则链顺序（docs/02 §3「规则链顺序」），templater 不得重排。
 
@@ -115,6 +117,7 @@ rules:
       - steamcontent.com   # 游戏内容 CDN（所有大流量下载）
       - steamserver.net    # Steam 网络/边缘 CDN
       - steamchina.com     # 蒸汽平台（国服）
+      - steampipe.akamaized.net   # Akamai 分支下载 CDN（主 CDN 不可用时客户端自动换源）；精确主机，勿放宽为整个 akamaized.net
     note: 校准（2026-10-04 实测）：游戏下载走直连是对的（满带宽且不烧机场流量）；
       显式钉死而不赌漏网之鱼默认值——鱼组被手动切回 🚀 时下载流量不跟着改道代理
 
@@ -138,6 +141,60 @@ rules:
       （Global 仅 steamconnecttest.com，ChinaMax 只收国内第三方站），漏网之鱼翻转默认
       直连后官网系全部落 MATCH 直连被墙不可用；显式钉死走代理，下载 CDN 由
       steam-download 前置钉直连互不干扰
+
+  # ---- 4.5 直连修正（自维护补丁：回收被 Global/Google 抢先的国内可达域）----
+  - name: direct-fix
+    category: 直连（自维护补丁）
+    source: builtin
+    clash_file: direct-fix.yaml
+    sr_file: direct-fix.list
+    policy: DIRECT
+    behavior: classical   # payload 为 DOMAIN-SUFFIX,x 行，behavior 须为 classical
+    domains:
+      # NVIDIA 驱动链路（2026-10-09 NAS 直连实测：检测 307→geforce.cn、下载
+      # 301→nvidia.cn，cn.download.nvidia.cn 拉满 107Mbps；须成对直连——只钉下载域时
+      # 检测走代理拿海外链接，下载直连反而断链）
+      - gfwsl.geforce.com        # 驱动检测入口（Akamai 按 CC=CN 导中国站）
+      - geforce.cn               # 检测中国站（gfwsl.geforce.cn）
+      - us.download.nvidia.com   # NVIDIA App 下载主域（301→cn.download.nvidia.cn）
+      - cn.download.nvidia.com   # 下载入口（ChinaMax 同名条目被 Global 抢先成死条目）
+      - nvidia.cn                # 下载 CDN + 中文主站
+      # JetBrains（2026-10-09 实测：download 302→download-cdn.clf.jetbrains.com.cn）
+      - download.jetbrains.com
+      - jetbrains.com.cn         # 中国下载 CDN（含 download-cdn.clf.*）
+      - data.services.jetbrains.com   # 更新元数据 API
+      # Adobe 创意云下载 CDN
+      - download.adobe.com
+      - ccmdls.adobe.com
+      # Chrome 组件与 Google 中国特供域（ChinaMax 收录但被 Google 集抢先的死条目回收；
+      # redirector 后续 sn-* 动态节点落漏网之鱼默认直连兜底）
+      - redirector.gvt1.com
+      - redirector.gcpcdn.gvt1.com
+      - redirector.offline-maps.gvt1.com
+      - redirector.snap.gvt1.com
+      - beacons.gvt2.com
+      - beacons2.gvt2.com
+      - beacons3.gvt2.com
+      - beacons.gcp.gvt2.com
+      - gvt2-cn.com
+      - recaptcha.net            # reCAPTCHA 中国镜像（Google 官方国内可用版）
+      - recaptcha-cn.net
+      - cn.widevine.com          # Widevine DRM 中国镜像
+      - dartsearch-cn.net
+      - doubleclick-cn.net
+      - admob-cn.com
+      - 2mdn-cn.net
+      - app-measurement-cn.com
+      # NTP 对时（经代理 UDP 转发漂移大）
+      - cn.pool.ntp.org
+      # 厂商中国 CDN（仅收实测可达者）
+      - support-cn.samsung.com
+      - ztedevices.com
+    note: 校准（2026-10-09 实测）：scripts/audit_dead_rules.py 全链模拟发现 157 条 ChinaMax
+      条目被前位 Global/Google 抢先走代理（cn.download.nvidia.com 即此类死条目）。本集只收
+      NAS 直连实测可达者；不可达不收（留在代理侧可用）：international.download.nvidia.com /
+      www.nvidia.com / cdn.samsung.com / cdn.jetbrains.com / gstatic-cn.com / qiao-cn.com /
+      kaspersky 系（DNS 解析失败）。测速/排查脚本见 scripts/audit_dead_rules.py
 
   # ---- 5. M-Team（自维护补丁：PT tracker 钉直连）----
   - name: mteam-tracker
@@ -195,6 +252,21 @@ rules:
     policy: "🎁 OpenAI"
     behavior: classical
 
+  # ---- 8.2 Gemini（自维护补丁：AI Studio 现用主域，置于 Gemini 之前）----
+  - name: gemini-extra
+    category: AI 单列（自维护补丁）
+    source: builtin
+    clash_file: gemini-extra.yaml
+    sr_file: gemini-extra.list
+    policy: "🤖 Gemini"
+    behavior: classical   # payload 为 DOMAIN-SUFFIX,x 行，behavior 须为 classical
+    domains:
+      - aistudio.google.com
+    note: 校准（2026-10-09 实测）：上游 Gemini 集（2025-06-06 版）只收旧名 makersuite.google.com
+      与 ai.google.dev，无 AI Studio 现用主域 aistudio.google.com——该域命中 Google 集落
+      📢 谷歌服务（首位默认 ♻️ 常规自动＝任意最快节点，出口地区不受控），而 🤖 Gemini 组
+      是美国 url-test（满足出口地区要求）。置于 Gemini 之前（且远早于 Google 集）显式归组
+
   - name: Gemini
     category: AI 单列
     source: blackmatrix7
@@ -222,7 +294,10 @@ rules:
     behavior: classical   # payload 为 DOMAIN-SUFFIX,x 行，behavior 须为 classical
     domains:
       - x.ai
-    note: 校准（2026-09-27 实测）：blackmatrix7 无 Grok 规则集（Clash/SR 两树均 404），转自维护内置基线
+      - grok.com   # 网页版主入口（上游 Twitter 集收 grok.com，本集先行命中）
+    note: 校准（2026-09-27 实测）：blackmatrix7 无 Grok 规则集（Clash/SR 两树均 404），转自维护内置基线；
+      校准（2026-10-09 实测）：补 grok.com——本集（第 11 位）先于 Twitter 集（第 17 位），缺失时
+      Grok 网页版主入口被 Twitter 集抢到 🚀，API（x.ai 后缀）与网页版对 🧠 组的随动语义分裂
 
   - name: Perplexity
     category: AI 单列
@@ -246,7 +321,11 @@ rules:
     domains:
       - cursor.com
       - cursor.sh
-    note: 校准（2026-09-27 实测）：blackmatrix7 无 Cursor/CursorAI 规则集，转自维护内置基线
+      - cursorapi.com    # 模型 API（Global 集收 cursorapi.com，缺失时与其脱钩）
+      - cursor-cdn.com   # 客户端 CDN
+    note: 校准（2026-09-27 实测）：blackmatrix7 无 Cursor/CursorAI 规则集，转自维护内置基线；
+      校准（2026-10-09 实测）：补 cursorapi.com/cursor-cdn.com——Cursor 客户端的模型 API/CDN
+      流量原被 Global 集推向 🚀，与 🧠 组脱钩，用户钉 🧠 切组无效
 
   # ---- 9. AI 兜底（聚合）----
   - name: AI
@@ -265,7 +344,12 @@ rules:
       - openrouter.ai
       - together.ai
       - poe.com
-    note: 校准（2026-09-27 实测）：blackmatrix7 无 AI 聚合目录，转自维护兜底清单（未被单列的 AI 服务）
+      - suno.com
+      - suno.ai
+      - elevenlabs.io
+    note: 校准（2026-09-27 实测）：blackmatrix7 无 AI 聚合目录，转自维护兜底清单（未被单列的 AI 服务）；
+      校准（2026-10-09 实测）：补 suno/elevenlabs——这些高频 AI 服务在 Global 集（落 🚀）而不在
+      本集，用户钉 🧠 组切组无效
 
   # ---- 10. 社交 ----
   - name: telegram-extra
@@ -349,6 +433,21 @@ rules:
     policy: "🎵 Spotify"
     behavior: classical
 
+  # ---- 11.2 snssdk（自维护直连补丁：字节国内 API 域抢回直连，置于 TikTok 之前）----
+  - name: snssdk-direct
+    category: 直连（自维护补丁）
+    source: builtin
+    clash_file: snssdk-direct.yaml
+    sr_file: snssdk-direct.list
+    policy: DIRECT
+    behavior: classical   # payload 为 DOMAIN-SUFFIX,x 行，behavior 须为 classical
+    domains:
+      - snssdk.com   # 字节国内基础设施域（api.snssdk.com 为抖音客户端主 API 域）；isnssdk.com 才是国际版 TikTok 域，勿收
+    note: 校准（2026-10-09 实测）：上游 TikTok 集收 DOMAIN-SUFFIX,snssdk.com（TikTok.yaml:28），
+      规则链 TikTok（第 22 位）先于 ChinaMax 直连（第 39 位）命中即生效，国内字节 App 的 API
+      流量被推 🚀 走境外出口；ChinaMax/Global 均无 snssdk.com 覆盖（ChinaMax 仅 tobsnssdk.com）。
+      补丁前置把该域抢回直连（自维护补丁排在其要修正的上游大类之前）
+
   - name: TikTok
     category: 流媒体
     source: blackmatrix7
@@ -367,6 +466,112 @@ rules:
     policy: "🚀 节点选择"
     behavior: classical
 
+  # ---- 11.5 游戏平台 → 🎮 游戏平台（2026-10-09 新增：复活孤儿组）----
+  # 位置硬约束：必须在「12. 大厂」之前——校准（2026-10-09 实测）Microsoft 集
+  # 覆盖 Xbox 集 40/42：xboxab.net 与 xboxservice.com 上游 Microsoft 集无覆盖，
+  # 依赖 Xbox 集自身前置兜住（另 2 条 DOMAIN 行落 live.com/msauth.net 后缀覆盖）；
+  # 放后面 Xbox 流量会被 Ⓜ️ 微软服务提前吃掉；
+  # 反向安全：游戏九集均为纯游戏域，无 microsoft.com/google.com 等泛域，前置不污染大厂分流。
+  # 组语义：🎮 默认 DIRECT（商店/登录直连），联机劣化时在组内手动切港区等；
+  # Steam 不在此段——已有 steam-download（DIRECT）/ steam-extra（🚀）前置精准分流。
+  # ---- 11.5.0 Helldivers 2（自维护补丁：联机 API 域归 🎮，2026-10-09）----
+  # 上游九集均不收 thehelldiversgame.com（校准实测），不补则联机/匹配 API 落
+  # MATCH 鱼组直连，且切 🎮 组救不到；归 🎮 而非 🚀：游戏联机经 url-test 地区组
+  # 中途换节点=掉线重连，🎮 组可钉裸节点。默认仍 DIRECT，联机要走代理时在面板
+  # 把 🎮 切港区/裸节点，PSN 认证（PlayStation 集）同组一起切。
+  - name: helldivers-extra
+    category: 游戏平台（自维护补丁）
+    source: builtin
+    clash_file: helldivers-extra.yaml
+    sr_file: helldivers-extra.list
+    policy: "🎮 游戏平台"
+    behavior: classical   # payload 为 DOMAIN-SUFFIX,x 行，behavior 须为 classical
+    domains:
+      - thehelldiversgame.com
+    processes:            # 仅进 Clash 系产物（SR 端无进程概念，自动跳过）
+      - helldivers2.exe
+    note: 联机 API 走域名规则；P2P 裸 IP 无域可钉，由 processes 钉整进程归 🎮（CNCIDR 前置，国内玩家 IP 仍直连）
+  - name: Epic
+    category: 游戏平台
+    source: blackmatrix7
+    upstream_file: Epic
+    clash_file: Epic.yaml
+    sr_file: Epic.list
+    policy: "🎮 游戏平台"
+    behavior: classical
+
+  - name: Riot
+    category: 游戏平台
+    source: blackmatrix7
+    upstream_file: Riot
+    clash_file: Riot.yaml
+    sr_file: Riot.list
+    policy: "🎮 游戏平台"
+    behavior: classical
+
+  - name: Blizzard
+    category: 游戏平台
+    source: blackmatrix7
+    upstream_file: Blizzard
+    clash_file: Blizzard.yaml
+    sr_file: Blizzard.list
+    policy: "🎮 游戏平台"
+    behavior: classical
+
+  - name: EA
+    category: 游戏平台
+    source: blackmatrix7
+    upstream_file: EA
+    clash_file: EA.yaml
+    sr_file: EA.list
+    policy: "🎮 游戏平台"
+    behavior: classical
+
+  - name: Origin
+    category: 游戏平台
+    source: blackmatrix7
+    upstream_file: Origin
+    clash_file: Origin.yaml
+    sr_file: Origin.list
+    policy: "🎮 游戏平台"
+    behavior: classical
+
+  - name: Ubisoft
+    category: 游戏平台
+    source: blackmatrix7
+    upstream_file: Ubisoft
+    clash_file: Ubisoft.yaml
+    sr_file: Ubisoft.list
+    policy: "🎮 游戏平台"
+    behavior: classical
+
+  - name: PlayStation
+    category: 游戏平台
+    source: blackmatrix7
+    upstream_file: PlayStation
+    clash_file: PlayStation.yaml
+    sr_file: PlayStation.list
+    policy: "🎮 游戏平台"
+    behavior: classical
+
+  - name: Xbox
+    category: 游戏平台
+    source: blackmatrix7
+    upstream_file: Xbox
+    clash_file: Xbox.yaml
+    sr_file: Xbox.list
+    policy: "🎮 游戏平台"
+    behavior: classical
+
+  - name: Nintendo
+    category: 游戏平台
+    source: blackmatrix7
+    upstream_file: Nintendo
+    clash_file: Nintendo.yaml
+    sr_file: Nintendo.list
+    policy: "🎮 游戏平台"
+    behavior: classical
+
   # ---- 12. 大厂 → 对应 select 组 ----
   - name: GitHub
     category: 大厂
@@ -374,9 +579,10 @@ rules:
     upstream_file: GitHub
     clash_file: GitHub.yaml
     sr_file: GitHub.list
-    policy: "📢 谷歌服务"
+    policy: "🐱 GitHub"
     behavior: classical
-    note: 大厂四件套里 GitHub 无专属组，归入谷歌服务组（默认 ♻️ 常规自动，可手动改）
+    note: GitHub/ghcr 拆专属组（2026-10-07 实测 Fastly 对机场出口的吞吐量限速与谷歌路径
+      无关，优选/钉选只动 GitHub 流量；组内含裸节点供 scripts/gh_probe.py 吞吐量优选）
 
   - name: Google
     category: 大厂
@@ -400,10 +606,15 @@ rules:
     category: 大厂
     source: blackmatrix7
     upstream_file: Apple
+    upstream_clash: Apple_Domain   # 主 Apple.yaml 为空心桩（头注声明 1551 条域名后缀、payload 实仅 33 行且 0 域名）；_Domain 变体 1,560 条纯裸域
+    upstream_sr: Apple_Domain
     clash_file: Apple.yaml
     sr_file: Apple.list
     policy: "🍎 苹果服务"
-    behavior: classical
+    behavior: domain
+    note: 校准（2026-10-09 实测）：主 Apple.yaml 空心——🍎 组对 apple.com/icloud.com 等主域零命中，
+      流量越组落 Global（收 +.apple.com/+.icloud.com）进 🚀 走代理，App Store/iCloud 本可直连的大流量
+      改道机场；改用 _Domain 双格式变体恢复（Global/ChinaMax 同款处理），behavior 相应由 classical 调整为 domain
 
   # ---- 13. 国际大类 → 节点选择 ----
   - name: Global
@@ -420,12 +631,17 @@ rules:
 
   - name: ProxyGFWlist
     category: 国际大类
-    source: blackmatrix7
-    upstream_file: Proxy                        # 校准（2026-09-27 实测）：blackmatrix7 无 ProxyGFWlist 目录，GFW 聚合实际位于 rule/Proxy
+    source: loyalsoldier
+    upstream_file: gfw.txt
     clash_file: ProxyGFWlist.yaml
     sr_file: ProxyGFWlist.list
     policy: "🚀 节点选择"
-    behavior: classical
+    behavior: domain
+    note: 校准（2026-09-27 实测）：blackmatrix7 无 ProxyGFWlist 目录，GFW 聚合实际位于 rule/Proxy；
+      校准（2026-10-09 实测）：其 yaml 亦为空心桩（头注声明 6795 条域名后缀、payload 实 126 条且 0 域名），
+      GFW 第二道兜底层空壳；改用 Loyalsoldier gfw.txt（payload 纯 +.域 裸域行），rulesync 经
+      payload_yaml_to_list 裸域分支转双格式缓存，behavior 相应由 classical 调整为 domain。
+      链位不动（Global 之后、ChinaMax 之前）：Global 有桩化前科，此层是 Global 再桩化时的兜底
 
   # ---- 14-15. 直连（Loyalsoldier txt payload，rulesync 转双格式缓存）----
   - name: ChinaMax

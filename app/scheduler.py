@@ -33,8 +33,9 @@ JOB_SUB_REFRESH = "sub_refresh"
 JOB_RULES_MIRROR = "rules_mirror"
 JOB_PURITY_SCAN = "purity_scan"
 JOB_HEALTH_PROBE = "health_probe"
+JOB_GH_SPEED_PROBE = "gh_speed_probe"
 JOB_IDS: tuple[str, ...] = (JOB_SUB_REFRESH, JOB_RULES_MIRROR, JOB_PURITY_SCAN,
-                            JOB_HEALTH_PROBE)
+                            JOB_HEALTH_PROBE, JOB_GH_SPEED_PROBE)
 
 _STATE_LABELS = {"ok": "成功", "error": "失败"}
 
@@ -82,6 +83,19 @@ def _job_health_probe(config: AppConfig, store: Store) -> str:
     if report.unavailable and not report.checked:
         return "探测实例不可用，本轮健康采样放弃（主链路无感）"
     summary = f"采样 {report.checked} 个，可达 {report.ok_count} 个（{report.ok_rate:.0%}）"
+    if report.unavailable:
+        summary += "（探测实例中途失效，尾部节点本轮无样本）"
+    return summary
+
+
+def _job_gh_speed_probe(config: AppConfig, store: Store) -> str:
+    from app.ghspeed import sweep
+
+    nodes = store.list_nodes(filtered=False)
+    report = sweep(nodes, config=config, store=store)
+    if report.unavailable and not report.checked:
+        return "探测实例不可用，本轮 GitHub 测速放弃（主链路无感）"
+    summary = f"实测 {report.checked} 个，失败/跳过 {report.skipped} 个"
     if report.unavailable:
         summary += "（探测实例中途失效，尾部节点本轮无样本）"
     return summary
@@ -186,6 +200,12 @@ def create_scheduler(config: AppConfig, store: Store) -> BackgroundScheduler:
             "interval",
             {"minutes": config.health_probe_minutes},
             lambda: _job_health_probe(config, store),
+        )
+    if config.ghprobe_hours > 0:
+        bodies[JOB_GH_SPEED_PROBE] = (
+            "interval",
+            {"hours": config.ghprobe_hours},
+            lambda: _job_gh_speed_probe(config, store),
         )
     wrappers: dict[str, Callable[[], dict[str, Any]]] = {}
     for job_id, (trigger, trigger_kwargs, body) in bodies.items():

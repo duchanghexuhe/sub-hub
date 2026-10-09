@@ -241,15 +241,28 @@ def is_rule_list(data: bytes) -> bool:
 
 
 def payload_yaml_to_list(data: bytes) -> str:
-    """Loyalsoldier txt（payload YAML，裸 CIDR）→ SR .list（IP-CIDR / IP-CIDR6 行）。"""
+    """Loyalsoldier txt（payload YAML）→ SR .list 行。
+
+    行含 `/` 视为 CIDR：含冒号输出 IP-CIDR6、否则 IP-CIDR；其余为裸域行
+    （`+.域` / 前导点 / 裸域，如 gfw.txt 全量 `+.域`），输出 DOMAIN-SUFFIX
+    （去列表语法前缀）——旧实现对域名行也无条件转 IP-CIDR，gfw 类纯域名
+    上游会被整体转成死规则。
+    """
     doc = yaml.safe_load(data.decode("utf-8", errors="replace")) or {}
     lines = ["# 本文件由 sub-hub rulesync 自上游 txt（payload 格式）转换生成"]
     for item in doc.get("payload") or []:
-        cidr = str(item).strip().strip("'\"")
-        if not cidr:
+        raw = str(item).strip().strip("'\"")
+        if not raw:
             continue
-        kind = "IP-CIDR6" if ":" in cidr else "IP-CIDR"
-        lines.append(f"{kind},{cidr}")
+        if "/" in raw:
+            kind = "IP-CIDR6" if ":" in raw else "IP-CIDR"
+            lines.append(f"{kind},{raw}")
+            continue
+        if raw.startswith("+."):
+            raw = raw[2:]
+        elif raw.startswith("."):
+            raw = raw[1:]
+        lines.append(f"DOMAIN-SUFFIX,{raw}")
     return "\n".join(lines) + "\n"
 
 
@@ -259,14 +272,17 @@ def _render_builtin_rule(domains: list[str], ipcidrs: list[str] | None = None) -
     """按 manifest 的 domains/ips 生成 (yaml 文本, list 文本)——DOMAIN-SUFFIX / IP-CIDR 形态。
 
     IP 行不带 no-resolve：SR 端 templater._payload_line_to_sr_rule 对含逗号行原样
-    追加策略，落成 `IP-CIDR,段,DIRECT`（no-resolve 夹在值与策略之间是非法语法）。
+    追加策略，落成 `IP-CIDR,段,DIRECT`（no-resolve 夹在值与策略之间是非法语法）；
+    IPv6 段输出 IP-CIDR6（IP-CIDR 不匹配 v6 目标，SR 语法要求 IP-CIDR6）。
     """
     header = [
         "# 本文件由 sub-hub rulesync 依据 rules_manifest.yaml 的 domains/ips 生成（内置自维护规则）",
         "# 请勿手工编辑；增删请改 rules_manifest.yaml 后重跑 build_baselines()",
     ]
     payload_lines = [f"DOMAIN-SUFFIX,{d}" for d in domains]
-    payload_lines += [f"IP-CIDR,{i}" for i in (ipcidrs or [])]
+    for i in (ipcidrs or []):
+        kind = "IP-CIDR6" if ":" in i else "IP-CIDR"
+        payload_lines.append(f"{kind},{i}")
     yaml_text = "\n".join(header + ["payload:"] + [f"  - {ln}" for ln in payload_lines]) + "\n"
     list_text = "\n".join(header + payload_lines) + "\n"
     return yaml_text, list_text

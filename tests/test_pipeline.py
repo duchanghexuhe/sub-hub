@@ -61,9 +61,10 @@ class Harness:
         self.publish_errors: list[str] | None = None
         # templater 可编程故障
         self.render_garbage = False
-        # 每次 render 收到的 purity / stability 参数（对齐真实 templater 契约的回灌断言）
+        # 每次 render 收到的 purity / stability / gh_speed 参数（回灌断言）
         self.render_purity: list = []
         self.render_stability: list = []
+        self.render_gh_speed: list = []
         # mirror 记录
         self.mirror_enabled = True
         self.mirror_attempts = 0
@@ -180,9 +181,11 @@ class Harness:
             names = [n.name for n in nodes]
             return [{"name": "🚀 节点选择", "type": "select", "proxies": names}]
 
-        def render_clash(nodes, *, config, rules, offline=False, purity=None, stability=None):
+        def render_clash(nodes, *, config, rules, offline=False, purity=None, stability=None,
+                         gh_speed=None):
             harness.render_purity.append(list(purity or []))
             harness.render_stability.append(list(stability or []))
+            harness.render_gh_speed.append(list(gh_speed or []))
             if harness.render_garbage:
                 return "proxies: [未闭合"   # 必然触发 YAML 解析错误
             doc = {
@@ -193,7 +196,8 @@ class Harness:
             }
             return yaml.safe_dump(doc, allow_unicode=True, sort_keys=False)
 
-        def render_sr_conf(nodes, *, config, rules, offline=False, purity=None, stability=None):
+        def render_sr_conf(nodes, *, config, rules, offline=False, purity=None, stability=None,
+                           gh_speed=None):
             if harness.render_garbage:
                 return "垃圾内容，无段落结构"
             names = [n.name for n in nodes] or ["DIRECT"]
@@ -205,7 +209,7 @@ class Harness:
             lines.append("FINAL,🚀 节点选择")
             return "\n".join(lines) + "\n"
 
-        def render_sr_yaml(nodes, *, config, rules, purity=None, stability=None):
+        def render_sr_yaml(nodes, *, config, rules, purity=None, stability=None, gh_speed=None):
             if harness.render_garbage:
                 return "proxies: [未闭合"
             names = [n.name for n in nodes] or ["DIRECT"]
@@ -722,6 +726,27 @@ def test_render_receives_stability_summary(harness: Harness, config: AppConfig, 
         assert rows[0]["node_name"] == "🇺🇸 美国 洛杉矶 家庭宽带 01"
         assert rows[0]["down_streak"] == 1           # 仅 1 轮失败：未达判死线但已可见
         assert rows[0]["hard_down"] is False
+
+
+def test_render_receives_latest_gh_speed(harness: Harness, config: AppConfig, store: Store,
+                                         sub_a_path: Path) -> None:
+    """渲染回灌最新一轮 GitHub 吞吐量结果（🐱 GitHub 组优选/排序的数据源）。"""
+    from app.models import GhSpeedSample
+
+    _add_sub(store, "a")
+    harness.set_sub("a", sub_a_path)
+    store.save_gh_speed_samples([GhSpeedSample(
+        node_name="🇺🇸 美国 洛杉矶 家庭宽带 01", source_sub="a",
+        checked_at=utils.now_iso(), speed_mbps=27.21,
+    )])
+
+    assert pipeline.run_full_pipeline(config, store).published is True
+
+    assert len(harness.render_gh_speed) == 2         # 主 + 离线两次渲染
+    for rows in harness.render_gh_speed:
+        assert len(rows) == 1
+        assert rows[0].node_name == "🇺🇸 美国 洛杉矶 家庭宽带 01"
+        assert rows[0].speed_mbps == 27.21
 
 
 def test_single_sub_refresh_keeps_disambiguation(harness: Harness, config: AppConfig,

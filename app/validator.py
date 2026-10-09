@@ -53,6 +53,14 @@ _ALLOWED_SR_PROXY_TYPES = {
     "anytls", "snell", "http", "https", "socks5", "socks5-tls", "wireguard", "ssh",
 }
 _ALLOWED_SR_GROUP_TYPES = {"select", "url-test", "fallback", "load-balance", "static", "ssid"}
+# SR 规则类型白名单（[Rule]/rules 首字段；内联展开产物的合法形态，从严拦截
+# mihomo-only 或拼错类型随内联展开静默进入 SR 产物）
+_ALLOWED_SR_RULE_TYPES = {
+    "DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD",
+    "IP-CIDR", "IP-CIDR6", "IP-ASN", "GEOIP",
+    "PROCESS-NAME", "USER-AGENT", "URL-REGEX",
+    "SRC-IP", "SRC-PORT", "DST-PORT", "PROTOCOL",
+}
 
 
 class PublishError(Exception):
@@ -98,6 +106,9 @@ def validate_clash_yaml(text: str) -> list[str]:
     sniffer = doc.get("sniffer")
     if not isinstance(sniffer, dict) or sniffer.get("enable") is not True:
         errors.append("缺少 sniffer 配置段（裸 IP 连接靠 SNI 嗅探恢复域名，否则域名规则全部失效）")
+    profile = doc.get("profile")
+    if not isinstance(profile, dict) or profile.get("store-selected") is not True:
+        errors.append("缺少 profile.store-selected: true（gh_probe 钉选的组选中值要跨内核重启/重导入存活）")
 
     # proxies
     proxies = doc.get("proxies")
@@ -393,7 +404,7 @@ def validate_sr_yaml(text: str) -> list[str]:
 
     if "rule-providers" in doc:
         errors.append("SR YAML 不得包含 rule-providers（规则须全内联，外链 SR 拉不到）")
-    for key in ("mixed-port", "external-controller", "dns", "sniffer"):
+    for key in ("mixed-port", "external-controller", "dns", "sniffer", "profile"):
         # 这些是 mihomo 运行项，SR 导入路径不需要也不消费；带上无害但容易
         # 让人误以为 SR 会执行同等行为（如 fake-ip/嗅探），干脆禁止。
         if key in doc:
@@ -419,16 +430,40 @@ def validate_sr_yaml(text: str) -> list[str]:
         if not last.startswith("MATCH,"):
             errors.append(f"SR YAML 最后一条规则必须是 MATCH（当前：{last[:40]}）")
 
+    # 规则行级形态校验：内联展开只补类型前缀与策略，行本身畸形（列表语法残留、
+    # v6 段写在 IP-CIDR 里）不匹配任何主机却能让五份校验全过，这里从严拦截
+    for i, r in enumerate(rules or []):
+        if not isinstance(r, str):
+            continue
+        parts = [p.strip() for p in r.split(",")]
+        if parts[0] == "MATCH":
+            continue
+        if parts[0] not in _ALLOWED_SR_RULE_TYPES:
+            errors.append(f"rules 第 {i + 1} 条规则类型 SR 不支持：{r[:60]}")
+            continue
+        value = parts[1] if len(parts) > 1 else ""
+        if parts[0] in ("DOMAIN", "DOMAIN-SUFFIX") and value.startswith(("+.", ".")):
+            errors.append(f"rules 第 {i + 1} 条 DOMAIN 值不得带列表语法前缀：{r[:60]}")
+        if (parts[0].startswith("DOMAIN") or parts[0] == "IP-CIDR") and ":" in value:
+            # IPv6 段必须写 IP-CIDR6（IP-CIDR,v6 是死规则）；DOMAIN 值不应含冒号
+            errors.append(f"rules 第 {i + 1} 条 {parts[0]} 值不得含 IPv6 冒号：{r[:60]}")
+
     return errors
 
 
 # ---------------------------------------------------------------- 一致性校验
 
 def _clash_rule_seq(doc: dict[str, Any]) -> list[tuple[str, str]]:
-    """mihomo rules → (规则集名或规则类型, 策略) 序列。"""
+    """mihomo rules → (规则集名或规则类型, 策略) 序列。
+
+    PROCESS-NAME（进程钉组）行跳过：仅 Clash 端存在（SR 无进程概念、不支持
+    该类型），一致性比对豁免，否则两边条数永远对不齐。
+    """
     seq: list[tuple[str, str]] = []
     for rule in doc.get("rules") or []:
         parts = [p.strip() for p in str(rule).split(",")]
+        if parts[0] == "PROCESS-NAME":
+            continue
         if parts[0] == "RULE-SET":
             seq.append((parts[1], parts[-1]))   # (rule-provider 名, 策略)
         else:
@@ -563,12 +598,36 @@ def _diff_summary(prev_meta: dict[str, Any] | None,
     return {"added": sorted(added), "removed": sorted(removed), "renamed": renamed}
 
 
+def _manifest_cache_gaps(config: AppConfig) -> list[str]:
+    """清单 ↔ 缓存对齐检查：manifest 每条的双格式缓存必须存在且非空占位。
+
+    占位文件有 pipeline 的 placeholder_rule_files 拦截，但「清单有条目而
+    data/rules/ 文件整体缺失」只在离线渲染端告警、照常静默发布（2026-10-09
+    游戏九集 18 文件缺失实证）——同一资源缺陷的两面在这里一并拦住。
+    templater/rulesync 模块缺失时跳过（可用性优先，与 pipeline 探测同款防御）。
+    """
+    try:
+        from app.rulesync import _is_placeholder
+        from app.templater import load_rules_manifest
+    except ImportError:
+        logger.warning("templater/rulesync 模块缺失，跳过清单↔缓存对齐检查")
+        return []
+    gaps: list[str] = []
+    for entry in load_rules_manifest():
+        for fname in (entry.clash_file, entry.sr_file):
+            path = config.rules_dir / fname
+            if not path.exists() or _is_placeholder(path):
+                gaps.append(fname)
+    return gaps
+
+
 def publish(config: AppConfig, store: Store, artifacts: dict[str, str],
             nodes: list[Node], *, note: str | None = None) -> ConfigVersion:
     """校验并发布五份产物到 data/out/v<NNNN>/（pipeline 的发布唯一入口）。
 
-    流程：5 份各自 validate_* → check_consistency(主两份) → 任一失败抛 PublishError
-    → 原子写入新版本目录 + meta.json（最后写，作为发布点）→ prune(keep=5)。
+    流程：5 份各自 validate_* → 清单↔缓存对齐 → check_consistency(主两份) →
+    任一失败抛 PublishError → 原子写入新版本目录 + meta.json（最后写，作为
+    发布点）→ prune(keep=5)。
     """
     _ = store  # 契约签名保留（发布事件暂不落库）
     errors: list[str] = []
@@ -592,6 +651,9 @@ def publish(config: AppConfig, store: Store, artifacts: dict[str, str],
     for key, validate in validators.items():
         problems = validate(artifacts[key])
         errors.extend(f"{key}：{p}" for p in problems)
+    cache_gaps = _manifest_cache_gaps(config)
+    if cache_gaps:
+        errors.append(f"规则缓存缺失或为空占位：{'、'.join(cache_gaps)}")
     consistency = check_consistency(artifacts["clash.yaml"], artifacts["shadowrocket.conf"])
     errors.extend(f"一致性校验：{p}" for p in consistency)
     if errors:

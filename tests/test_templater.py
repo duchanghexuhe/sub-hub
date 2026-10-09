@@ -19,7 +19,7 @@ import pytest
 import yaml
 
 from app.config import AppConfig
-from app.models import Node, PurityResult
+from app.models import GhSpeedSample, Node, PurityResult
 from app.templater import (
     FIXED_GROUP_ORDER,
     G_AI,
@@ -32,6 +32,8 @@ from app.templater import (
     G_FINAL,
     G_GAME,
     G_GEMINI,
+    G_GITHUB,
+    G_GITHUB_FAST,
     G_GOOGLE,
     G_MAIN,
     G_MICROSOFT,
@@ -46,6 +48,7 @@ from app.templater import (
     LAN_GUARD_RULES,
     RULE_PROVIDER_INTERVAL,
     RenderResult,
+    _process_pin_rules,
     build_groups,
     load_rules_manifest,
     order_claude_candidates,
@@ -151,6 +154,23 @@ def rule_cache(config: AppConfig) -> AppConfig:
 
 
 @pytest.fixture()
+def full_rule_cache(config: AppConfig) -> AppConfig:
+    """发布测试用：清单每条的双格式缓存就位（validator.publish 的清单↔缓存对齐
+    校验要求 data/rules/ 无缺失——本文件其余渲染测试只依赖 rule_cache 三件套，
+    缓存全量形态由 e2e 覆盖，这里仅满足发布的资源前置）。"""
+    for entry in load_rules_manifest():
+        for fname in (entry.clash_file, entry.sr_file):
+            path = config.rules_dir / fname
+            if not path.exists():
+                if fname.endswith(".yaml"):
+                    path.write_text("payload:\n  - DOMAIN-SUFFIX,unit.example.com\n",
+                                    encoding="utf-8")
+                else:
+                    path.write_text("DOMAIN-SUFFIX,unit.example.com\n", encoding="utf-8")
+    return config
+
+
+@pytest.fixture()
 def rendered(nodes: list[Node], config: AppConfig, rules, rule_cache: AppConfig) -> RenderResult:
     return render_all(nodes, config=config, rules=rules)
 
@@ -191,14 +211,21 @@ def test_load_rules_manifest_order_and_policy():
     assert entries[0].name == "claude-extra"
     assert entries[0].policy == "🛑 Claude 专用"
     assert entries[-1].name == "Download"
-    assert len(entries) == 33
+    assert len(entries) == 46   # 42 原条目 + gemini-extra + snssdk-direct + direct-fix + helldivers-extra（2026-10-09）
     by_name = {e.name: e for e in entries}
+    order = {e.name: i for i, e in enumerate(entries)}
     assert by_name["Claude"].policy == "🛑 Claude 专用"
     assert by_name["OpenAI"].policy == "🎁 OpenAI"
     assert by_name["Grok"].policy == "🧠 通用 AI"
     assert by_name["TikTok"].policy == "🚀 节点选择"
-    assert by_name["GitHub"].policy == "📢 谷歌服务"
+    assert by_name["GitHub"].policy == G_GITHUB
     assert by_name["CNCIDR"].policy == "DIRECT"
+    # 游戏平台九集复活 🎮 孤儿组，且整体必须先于大厂段——Microsoft 集
+    # 完整覆盖 Xbox 42 域，后置即被 Ⓜ️ 微软服务抢走（2026-10-09 实测）
+    for g in ("helldivers-extra", "Epic", "Riot", "Blizzard", "EA", "Origin", "Ubisoft",
+              "PlayStation", "Xbox", "Nintendo"):
+        assert by_name[g].policy == "🎮 游戏平台"
+        assert order[g] < order["Microsoft"]
 
 
 def test_selfmaintained_patches_precede_upstream_sets():
@@ -226,11 +253,11 @@ def test_build_groups_names_complete(nodes: list[Node], config: AppConfig):
     groups = build_groups(nodes, config=config)
     assert isinstance(groups, list) and all(isinstance(g, dict) for g in groups)
     names = [g["name"] for g in groups]
-    # 19 个固定组 + 8 个地区组 + 🌍 其他 = 28，顺序符合 docs/02 §2 组清单
+    # 20 个固定组 + 8 个地区组 + 🌍 其他 = 29，顺序符合 docs/02 §2 组清单
     region_names = [region_group_name(c) for c in ("HK", "TW", "JP", "SG", "US", "KR", "GB", "DE")]
     expected = [G_MAIN, G_AUTO, *region_names, OTHER_REGION_GROUP, *FIXED_GROUP_ORDER[2:]]
     assert names == expected
-    assert len(names) == 28
+    assert len(names) == 29
     types = {g["name"]: g["type"] for g in groups}
     assert types[G_MAIN] == "select"
     assert types[G_AUTO] == "url-test"
@@ -239,7 +266,7 @@ def test_build_groups_names_complete(nodes: list[Node], config: AppConfig):
     assert types[G_OPENAI] == types[G_GEMINI] == types[G_COPILOT] == "url-test"
     assert types[G_TG] == "url-test"
     assert types[G_NETFLIX] == types[G_DISNEY] == types[G_YOUTUBE] == types[G_SPOTIFY] == "select"
-    assert types[G_GOOGLE] == types[G_MICROSOFT] == types[G_APPLE] == "select"
+    assert types[G_GOOGLE] == types[G_MICROSOFT] == types[G_APPLE] == types[G_GITHUB] == "select"
     assert types[G_GAME] == "select"
     assert types[G_FINAL] == "select"
 
@@ -513,9 +540,16 @@ def test_ai_streaming_vendor_final_members(nodes: list[Node], config: AppConfig)
     for name in (G_NETFLIX, G_DISNEY, G_YOUTUBE, G_SPOTIFY):
         assert groups[name]["proxies"] == region_names
     assert groups[G_GOOGLE]["proxies"][0] == G_AUTO          # 默认 ♻️ 常规自动
+    assert groups[G_GITHUB]["proxies"][0] == G_AUTO          # 默认 ♻️ 常规自动（与拆组前等效）
+    # 成员含裸节点（ghspeed 测速数据驱动排序的成员基础）与地区组，无 DIRECT
+    assert nodes[0].name in groups[G_GITHUB]["proxies"]
+    assert "DIRECT" not in groups[G_GITHUB]["proxies"]
     assert groups[G_MICROSOFT]["proxies"][0] == "DIRECT"     # 默认 DIRECT
     assert groups[G_APPLE]["proxies"][0] == "DIRECT"
     assert groups[G_GAME]["proxies"][0] == "DIRECT"
+    # 游戏组必须能选到裸节点：地区组是 url-test 自动换节点，游戏中途切换=掉线；
+    # 钉死单节点是 🎮 的硬需求（2026-10-09 用户实测反馈）
+    assert nodes[0].name in groups[G_GAME]["proxies"]
     assert groups[G_FINAL]["proxies"] == ["DIRECT", G_MAIN, G_AUTO]
 
 
@@ -532,7 +566,7 @@ def test_filtered_nodes_never_rendered(nodes: list[Node], config: AppConfig, rul
 
 def test_render_four_artifacts_valid_and_consistent(rendered: RenderResult):
     assert rendered.stats.node_count == 15
-    assert rendered.stats.group_count == 28
+    assert rendered.stats.group_count == 29
     assert rendered.stats.sr_skipped_anytls == 2
     assert validate_clash_yaml(rendered.clash_yaml) == []
     assert validate_clash_yaml(rendered.clash_offline_yaml) == []
@@ -559,22 +593,41 @@ def test_group_sets_equal_between_formats(rendered: RenderResult):
     for line in _sr_section(rendered.sr_conf, "Proxy Group"):
         sr_names.append(line.split("=", 1)[0].strip())
     assert clash_names == sr_names
-    assert len(clash_names) == 28
+    assert len(clash_names) == 29
 
 
 def test_rule_chain_order_matches_manifest(rendered: RenderResult, rules, config: AppConfig):
     expected = [*LAN_GUARD_RULES, *(f"RULE-SET,{e.name},{e.policy}" for e in rules)]
+    expected.extend(_process_pin_rules(rules))   # 进程钉组：仅 Clash 链（MATCH 前）
     expected.append("MATCH,🐟 漏网之鱼")
     doc = _clash_doc(rendered.clash_yaml)
     assert doc["rules"] == expected
     assert doc["rules"][len(LAN_GUARD_RULES)] == "RULE-SET,claude-extra,🛑 Claude 专用"  # 自维护补丁最前
     assert doc["rules"][-1] == "MATCH,🐟 漏网之鱼"
-    # SR 主版本规则链同序
+    # SR 主版本规则链同序（且无进程规则——SR 无进程概念）
     sr_rules = _sr_section(rendered.sr_conf, "Rule")
     assert sr_rules[:len(LAN_GUARD_RULES)] == list(LAN_GUARD_RULES)      # LAN 护栏前置
     assert sr_rules[len(LAN_GUARD_RULES)] == f"RULE-SET,{config.base_url}/rules/claude-extra.list,🛑 Claude 专用"
     assert sr_rules[-1] == "FINAL,🐟 漏网之鱼"
-    assert len(sr_rules) == len(expected)
+    assert len(sr_rules) == len(expected) - len(_process_pin_rules(rules))
+    assert not any(r.startswith("PROCESS-NAME") for r in sr_rules)
+
+
+def test_process_pin_rule_only_in_clash(rendered: RenderResult):
+    """进程钉组（2026-10-09）：Clash 链尾 CNCIDR 后、MATCH 前归 🎮；SR 各版产物不得出现。
+
+    P2P 裸 IP 无域可钉，靠 PROCESS-NAME,helldivers2.exe 把游戏进程全部流量归组；
+    CNCIDR 前置保证国内玩家 IP 仍直连，只有境外长尾被进程规则接走。
+    """
+    doc = _clash_doc(rendered.clash_yaml)
+    chain = doc["rules"]
+    pn_idx = [i for i, r in enumerate(chain) if r.startswith("PROCESS-NAME")]
+    assert pn_idx, "进程钉组规则缺失"
+    assert chain[pn_idx[0]] == "PROCESS-NAME,helldivers2.exe,🎮 游戏平台"
+    assert chain[pn_idx[-1] + 1] == "MATCH,🐟 漏网之鱼"            # 全部位于 MATCH 之前
+    assert chain.index("RULE-SET,CNCIDR,DIRECT") < pn_idx[0]       # 国内 IP 先被直连吃掉
+    for artifact in (rendered.sr_conf, rendered.sr_yaml, rendered.sr_offline_conf):
+        assert "PROCESS-NAME" not in artifact
 
 
 def test_main_versions_reference_nas_rules(rendered: RenderResult, config: AppConfig):
@@ -619,8 +672,8 @@ def test_offline_inline_payload_sources(rendered: RenderResult, config: AppConfi
     assert providers["Telegram"]["payload"] == ["DOMAIN-SUFFIX,telegram.org"]  # 注释行被剔除
     assert providers["CNCIDR"]["payload"] == ["1.0.1.0/24", "1.0.2.0/24"]
     sr_rules = _sr_section(rendered.sr_offline_conf, "Rule")
-    # yaml 裸域名 → 自动补 DOMAIN-SUFFIX 前缀再落组
-    assert "DOMAIN-SUFFIX,api.anthropic.com,🛑 Claude 专用" in sr_rules
+    # yaml 裸域名 → 自动补 DOMAIN 前缀再落组（精确匹配，与 mihomo domain 行为裸域语义一致）
+    assert "DOMAIN,api.anthropic.com,🛑 Claude 专用" in sr_rules
     # .list 规则片段 → 直接追加策略
     assert "DOMAIN-SUFFIX,telegram.org,📲 Telegram" in sr_rules
     # 裸 CIDR → 自动补 IP-CIDR 前缀
@@ -750,7 +803,8 @@ def test_check_consistency_detects_tampering(rendered: RenderResult):
 # ---------------------------------------------------------------- 发布
 
 def test_publish_success_meta_and_hash(nodes: list[Node], config: AppConfig,
-                                       rules, store, rendered: RenderResult):
+                                       rules, store, rendered: RenderResult,
+                                       full_rule_cache: AppConfig):
     version = publish(config, store, _artifacts(rendered), nodes)
     assert version.version == 1
     assert version.node_count == 15
@@ -767,7 +821,8 @@ def test_publish_success_meta_and_hash(nodes: list[Node], config: AppConfig,
 
 
 def test_publish_diff_and_rename_heuristic(nodes: list[Node], config: AppConfig,
-                                           rules, store, rendered: RenderResult):
+                                           rules, store, rendered: RenderResult,
+                                           full_rule_cache: AppConfig):
     publish(config, store, _artifacts(rendered), nodes)
     # 改名场景：德国节点改名（server/port 不变）→ renamed 配对而非 added+removed
     renamed_nodes = list(nodes)
@@ -782,7 +837,8 @@ def test_publish_diff_and_rename_heuristic(nodes: list[Node], config: AppConfig,
 
 
 def test_publish_rejects_bad_artifacts(nodes: list[Node], config: AppConfig,
-                                       rules, store, rendered: RenderResult):
+                                       rules, store, rendered: RenderResult,
+                                       full_rule_cache: AppConfig):
     tampered = _artifacts(rendered)
     tampered["shadowrocket.conf"] = rendered.sr_conf.replace(
         "🎁 OpenAI = url-test", "🎁 开 AI = url-test")
@@ -801,7 +857,8 @@ def test_publish_rejects_bad_artifacts(nodes: list[Node], config: AppConfig,
 
 
 def test_publish_prunes_old_versions(nodes: list[Node], config: AppConfig,
-                                     rules, store, rendered: RenderResult):
+                                     rules, store, rendered: RenderResult,
+                                     full_rule_cache: AppConfig):
     artifacts = _artifacts(rendered)
     for i in range(7):
         publish(config, store, artifacts, nodes, note=f"第 {i + 1} 次发布")
@@ -809,3 +866,53 @@ def test_publish_prunes_old_versions(nodes: list[Node], config: AppConfig,
     assert versions == [3, 4, 5, 6, 7]  # 只保留最近 5 版
     meta = read_json(version_dir(config.out_dir, 7) / "meta.json")
     assert meta["note"] == "第 7 次发布"
+
+
+# ------------------------------------------------------------------ 🐱 GitHub 吞吐量优选
+
+def _gh_speed(rows: list[tuple[Node, float | None]]) -> list[GhSpeedSample]:
+    """构造 ghspeed 扫描落库形状的测速样本（键语义与 store.latest_gh_speed_samples 一致）。"""
+    return [GhSpeedSample(node_name=n.name, source_sub=n.source_sub,
+                          checked_at="2026-10-07T21:00:00", speed_mbps=v)
+            for n, v in rows]
+
+
+def test_github_group_ordered_by_gh_speed(nodes: list[Node], config: AppConfig):
+    """有测速数据：🏆 优选 fallback 组收最快 top-N；🐱 首位=优选组、节点按速度降序。"""
+    groups = {g["name"]: g for g in build_groups(
+        nodes, config=config,
+        gh_speed=_gh_speed([(nodes[0], 1.0), (nodes[1], 27.21), (nodes[2], 5.0)]))}
+    fast = groups[G_GITHUB_FAST]
+    assert fast["type"] == "fallback"
+    assert fast["proxies"] == [nodes[1].name, nodes[2].name, nodes[0].name]  # 27.21 > 5 > 1
+    gh = groups[G_GITHUB]
+    assert gh["type"] == "select"
+    assert gh["proxies"][0] == G_GITHUB_FAST                 # 首位=优选组（默认出口）
+    assert gh["proxies"][1] == G_AUTO and gh["proxies"][2] == G_MAIN
+    assert "DIRECT" not in gh["proxies"]
+    # 实测过的三个节点按速度降序紧随组与地区组；未测节点保持原序排在其后
+    measured_order = [nodes[1].name, nodes[2].name, nodes[0].name]
+    pos = [gh["proxies"].index(name) for name in measured_order]
+    assert pos == sorted(pos)
+    assert set(measured_order) <= set(gh["proxies"])
+
+
+def test_github_group_without_gh_speed_keeps_base_shape(nodes: list[Node], config: AppConfig):
+    """无测速数据：不生成优选组，🐱 维持基础形状（默认 ♻️ 常规自动）。"""
+    groups = {g["name"]: g for g in build_groups(nodes, config=config)}
+    assert G_GITHUB_FAST not in groups
+    gh = groups[G_GITHUB]
+    assert gh["type"] == "select"
+    assert gh["proxies"][0] == G_AUTO and gh["proxies"][1] == G_MAIN
+
+
+def test_github_ideal_group_excludes_hard_down(nodes: list[Node], config: AppConfig):
+    """判死节点纵然测速最快也不进优选组，并沉到 🐱 成员末尾。"""
+    stability = [_stat(nodes[1].name, nodes[1].source_sub, down_streak=3)]
+    groups = {g["name"]: g for g in build_groups(
+        nodes, config=config, stability=stability,
+        gh_speed=_gh_speed([(nodes[1], 27.21), (nodes[0], 1.0)]))}
+    assert nodes[1].name not in groups[G_GITHUB_FAST]["proxies"]   # 判死不入优选
+    gh_members = groups[G_GITHUB]["proxies"]
+    assert gh_members[0] == G_GITHUB_FAST
+    assert gh_members[-1] == nodes[1].name                          # 判死沉底

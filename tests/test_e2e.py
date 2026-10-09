@@ -47,7 +47,9 @@ from app.templater import (
     G_FINAL,
     G_MAIN,
     G_US,
+    LAN_GUARD_RULES,
     PROBE_URL,
+    _process_pin_rules,
     load_rules_manifest,
 )
 
@@ -66,12 +68,12 @@ SAME_NAME_B = f"{SAME_NAME} [{SUB_B}]"
 # 假节点判别词（三份 fixture 假节点名特征，任何产物中都不允许出现）
 FAKE_MARKERS = ("剩余流量", "套餐到期", "官网")
 
-# 全部期望组名：19 个固定组 + 9 个地区组（fixture 覆盖 8 个地区 + 1 个无地区特征节点）
+# 全部期望组名：20 个固定组 + 9 个地区组（fixture 覆盖 8 个地区 + 1 个无地区特征节点）
 EXPECTED_GROUPS = {
     G_MAIN, "♻️ 常规自动", G_US, G_CLAUDE, G_CLAUDE_BACKUP,
     "🎁 OpenAI", "🤖 Gemini", "🐙 Copilot", "🧠 通用 AI", "📲 Telegram",
     "🎬 Netflix", "🏰 Disney+", "📺 YouTube", "🎵 Spotify",
-    "📢 谷歌服务", "Ⓜ️ 微软服务", "🍎 苹果服务", "🎮 游戏平台", G_FINAL,
+    "📢 谷歌服务", "🐱 GitHub", "Ⓜ️ 微软服务", "🍎 苹果服务", "🎮 游戏平台", G_FINAL,
     "🇭🇰 香港", "🇹🇼 台湾", "🇯🇵 日本", "🇸🇬 新加坡", "🇺🇸 美国",
     "🇰🇷 韩国", "🇬🇧 英国", "🇩🇪 德国", "🌍 其他",
 }
@@ -113,6 +115,16 @@ def published(e2e_config: AppConfig, e2e_store: Store) -> pipeline.PipelineResul
     for entry in BASELINE_DIR.iterdir():
         if entry.is_file():
             shutil.copy2(entry, e2e_config.rules_dir / entry.name)
+
+    # 游戏九集写最小非占位双格式缓存：夹具自足，不随内置基线是否打包游戏文件漂移
+    # （基线缺文件时离线渲染空 payload 仅告警、rulesync 失败路径写占位拒绝发布——
+    # 这两条资源断言不该在本测试里判真伪）
+    for name in ("Epic", "Riot", "Blizzard", "EA", "Origin",
+                 "Ubisoft", "PlayStation", "Xbox", "Nintendo"):
+        (e2e_config.rules_dir / f"{name}.yaml").write_text(
+            "payload:\n  - DOMAIN-SUFFIX,e2e.example.com\n", encoding="utf-8")
+        (e2e_config.rules_dir / f"{name}.list").write_text(
+            "DOMAIN-SUFFIX,e2e.example.com\n", encoding="utf-8")
 
     content_map = {
         SUB_A: (FIXTURES_DIR / "sub_a.yaml").read_bytes(),
@@ -206,7 +218,10 @@ class TestFullChainPublish:
         vdir = utils.version_dir(e2e_config.out_dir, published.version)
         doc = _clash_doc((vdir / "clash.yaml").read_text(encoding="utf-8"))
         assert len(doc["proxies"]) == 15                      # 15 个真实节点
-        assert len(doc["rules"]) == 33 + 4 + 1                # 4 条内建 LAN 护栏 + 33 条 RULE-SET + MATCH
+        entries = load_rules_manifest()
+        assert len(doc["rules"]) == (
+            len(LAN_GUARD_RULES) + len(entries) + len(_process_pin_rules(entries)) + 1
+        )
         assert doc["rules"][-1] == f"MATCH,{G_FINAL}"
         assert doc["sniffer"]["enable"] is True       # 裸 IP 连接靠嗅探恢复域名
 

@@ -15,6 +15,12 @@ log-level: info
 allow-lan: false
 unified-delay: true
 tcp-concurrent: true
+# 进程钉组（PROCESS-NAME，游戏 P2P 归 🎮）依赖进程查找；strict=规则含进程类规则时启用
+find-process-mode: strict
+# 记住 select 组的选中值：gh_probe.py 钉选的 🐱 GitHub 节点在内核重启、
+# 订阅重导入后不回退默认（没有它，优选成果每次 reload 都被打回 ♻️ 常规自动）
+profile:
+  store-selected: true
 dns:
   enable: true
   enhanced-mode: fake-ip

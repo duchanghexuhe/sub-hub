@@ -20,7 +20,7 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from app.models import AttrChange, FetchStatus, HealthSample, Node, PurityResult, Subscription
+from app.models import AttrChange, FetchStatus, GhSpeedSample, HealthSample, Node, PurityResult, Subscription
 from app.utils import atomic_write_text, now_iso, restrict_permissions
 
 logger = logging.getLogger("subhub.store")
@@ -84,6 +84,15 @@ CREATE TABLE IF NOT EXISTS node_health_samples (
 );
 CREATE INDEX IF NOT EXISTS idx_health_node_time
     ON node_health_samples(node_name, source_sub, checked_at);
+CREATE TABLE IF NOT EXISTS gh_speed_samples (
+    node_name  TEXT NOT NULL,
+    source_sub TEXT NOT NULL,
+    checked_at TEXT NOT NULL,                      -- ISO8601（同一轮扫描共用）
+    speed_mbps REAL,                               -- NULL=该轮测速失败
+    PRIMARY KEY (node_name, source_sub, checked_at)
+);
+CREATE INDEX IF NOT EXISTS idx_ghspeed_node_time
+    ON gh_speed_samples(node_name, source_sub, checked_at);
 """
 
 _PURITY_COLUMNS = (
@@ -436,6 +445,42 @@ class Store:
         with self._lock:
             cur = self._conn.execute(
                 "DELETE FROM node_health_samples WHERE checked_at < ?", (before,))
+            self._conn.commit()
+        return cur.rowcount
+
+    # ------------------------------------------------------------------ gh_speed_samples
+
+    def save_gh_speed_samples(self, samples: list[GhSpeedSample]) -> None:
+        """批量写入一轮 GitHub 吞吐量扫描（同轮共用 checked_at；失败样本 speed_mbps=NULL）。"""
+        with self._lock:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO gh_speed_samples"
+                " (node_name, source_sub, checked_at, speed_mbps) VALUES (?, ?, ?, ?)",
+                [(s.node_name, s.source_sub, s.checked_at, s.speed_mbps) for s in samples],
+            )
+            self._conn.commit()
+
+    def latest_gh_speed_samples(self) -> list[GhSpeedSample]:
+        """每节点（node_name+source_sub）最新一条测速结果（🐱 GitHub 组排序用）。"""
+        sql = (
+            "SELECT node_name, source_sub, checked_at, speed_mbps FROM ("
+            "  SELECT *, ROW_NUMBER() OVER ("
+            "    PARTITION BY node_name, source_sub ORDER BY checked_at DESC"
+            "  ) AS rn FROM gh_speed_samples"
+            ") WHERE rn = 1 ORDER BY node_name"
+        )
+        with self._lock:
+            rows = self._conn.execute(sql).fetchall()
+        return [GhSpeedSample(
+            node_name=r["node_name"], source_sub=r["source_sub"],
+            checked_at=r["checked_at"], speed_mbps=r["speed_mbps"],
+        ) for r in rows]
+
+    def prune_gh_speed_samples(self, *, before: str) -> int:
+        """清理保留窗口之外的过期测速样本，返回删除行数（每轮扫描后调用）。"""
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM gh_speed_samples WHERE checked_at < ?", (before,))
             self._conn.commit()
         return cur.rowcount
 

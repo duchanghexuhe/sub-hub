@@ -227,8 +227,16 @@ class ProbeInstance:
         return shutil.which(raw)
 
     def _wait_ready(self, timeout: float = _START_TIMEOUT) -> bool:
-        """轮询控制 API /version 直到就绪；进程提前退出或超时返回 False。"""
+        """轮询控制 API 直到「/version 就绪且节点装载完成」；进程提前退出或超时返回 False。
+
+        mihomo（v1.19.31 实测）控制 API 先于代理集合装载对外服务：/version 通了
+        之后短暂窗口内 /proxies 仍为空，此窗口内 delay/切换一律 404
+        （2026-10-07 ghspeed 全量 404 实测）——因此 /version 通后还须等到本实例
+        节点名出现在 /proxies 才算就绪。
+        """
         deadline = time.monotonic() + timeout
+        wanted = {n.name for n in self._nodes}
+        version_ok = False
         while time.monotonic() < deadline:
             if self._proc is not None and self._proc.poll() is not None:
                 logger.warning("mihomo 探测进程在就绪前退出（code=%s）", self._proc.returncode)
@@ -236,10 +244,17 @@ class ProbeInstance:
             try:
                 resp = self._client.get("/version", timeout=1.0)
                 if resp.status_code == 200:
-                    return True
+                    version_ok = True
+                    if not wanted:
+                        return True
+                    proxies = self._client.get("/proxies", timeout=2.0).json()
+                    if wanted <= set(proxies.get("proxies", {})):
+                        return True
             except Exception:  # noqa: BLE001 —— 就绪前连接失败属预期，继续轮询
                 pass
             time.sleep(_POLL_INTERVAL)
+        if version_ok:
+            logger.warning("mihomo 控制 API 已就绪但节点集合 %.1fs 内未装载完成", timeout)
         return False
 
     @staticmethod

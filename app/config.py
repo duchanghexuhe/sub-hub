@@ -14,6 +14,9 @@
   SUBHUB_SKIP_ANYTLS           SR conf 是否跳过 anytls 节点，默认开（1/true/yes/on）
   SUBHUB_FETCH_UA              抓取订阅使用的 Clash UA
   SUBHUB_AUTO_MAX_RATE         常规自动组倍率上限，默认 1.0（全库无达标倍率时自动放宽到最低档）
+  SUBHUB_GHPROBE_HOURS         GitHub 吞吐量扫描间隔（小时），默认 6（0=关闭扫描）
+  SUBHUB_GHPROBE_SECONDS       每节点测速时长（秒），默认 5
+  SUBHUB_GHPROBE_TOP_N         🏆 GitHub 优选组收录的实测最快节点数，默认 5
 
 token：分发 token 存 data/token，首次启动自动生成 32 位 hex；secret.key 由
 store 层负责（0600）。密钥与订阅 URL 永不进日志/对话/配置产物。
@@ -88,6 +91,9 @@ class AppConfig:
     probe_mixed_port: int
     fetch_user_agent: str
     auto_max_rate: float             # 常规自动组倍率上限（低倍率省流；全库无达标时放宽到最低档）
+    ghprobe_hours: int               # 定时任务 5：GitHub 吞吐量扫描间隔（小时；0=关闭）
+    ghprobe_seconds: float           # 每节点测速时长（秒）
+    ghprobe_top_n: int               # 🏆 GitHub 优选组收录的实测最快节点数
     rules_proxy: str = ""            # 规则上游直连失败时的代理回落（空=不回落）；机场订阅不受此影响
 
     # ---------- 派生路径 ----------
@@ -183,6 +189,9 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
         fetch_user_agent=env.get("SUBHUB_FETCH_UA", "clash-verge/v2.0.0").strip()
         or "clash-verge/v2.0.0",
         auto_max_rate=_env_float(env, "SUBHUB_AUTO_MAX_RATE", 1.0),
+        ghprobe_hours=_env_int(env, "SUBHUB_GHPROBE_HOURS", 6),
+        ghprobe_seconds=_env_float(env, "SUBHUB_GHPROBE_SECONDS", 5.0),
+        ghprobe_top_n=_env_int(env, "SUBHUB_GHPROBE_TOP_N", 5),
         rules_proxy=env.get("SUBHUB_RULES_PROXY", "").strip(),
     )
     return config

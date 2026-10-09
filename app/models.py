@@ -156,6 +156,21 @@ class HealthSample:
 
 
 @dataclass
+class GhSpeedSample:
+    """单节点 GitHub CDN 吞吐量采样（ghspeed 定时写入，🐱 GitHub 组排序消费）。
+
+    经节点出口实测 GitHub release 资产（Fastly 路径）的下载速度，MB/s。
+    speed_mbps=None 表示该轮测速失败（select 失败/连不上/流中断）；
+    0.0 是真实测量值（连上了但窗口内没读到数据），排序时按最慢处理。
+    """
+
+    node_name: str
+    source_sub: str
+    checked_at: str                             # ISO8601（同一轮扫描共用同一时刻）
+    speed_mbps: float | None = None
+
+
+@dataclass
 class ConfigVersion:
     """一次发布的元数据（写入 data/out/v<NNNN>/meta.json，由 utils 版本目录管理）。"""
 

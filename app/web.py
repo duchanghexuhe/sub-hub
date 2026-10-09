@@ -134,6 +134,10 @@ def get_purity() -> ModuleType:
     return _import_or_503("app.purity", "纯净度")
 
 
+def get_ghspeed() -> ModuleType:
+    return _import_or_503("app.ghspeed", "GitHub 吞吐量")
+
+
 def get_mirror() -> ModuleType:
     return _import_or_503("app.mirror", "镜像")
 
@@ -775,6 +779,48 @@ def _register_routes(app: FastAPI) -> None:
             "full": full,
             "results": [_purity_public(r) for r in getattr(report, "results", None) or []],
         }
+
+    @app.post("/api/ghspeed/scan")
+    def ghspeed_scan(
+        cfg: AppConfig = Depends(get_cfg),
+        st: Store = Depends(get_st),
+        ghspeed: ModuleType = Depends(get_ghspeed),
+    ) -> dict[str, Any]:
+        """手动触发一轮 GitHub 吞吐量扫描（同步执行，约 节点数×(预检+测速窗口) 秒）。"""
+        nodes = st.list_nodes(filtered=False)
+        report = ghspeed.sweep(nodes, config=cfg, store=st)
+        return {
+            "ok": True,
+            "checked": report.checked,
+            "skipped": report.skipped,
+            "unavailable": report.unavailable,
+            "results": [
+                {
+                    "node_name": s.node_name,
+                    "source_sub": s.source_sub,
+                    "checked_at": s.checked_at,
+                    "speed_mbps": s.speed_mbps,
+                }
+                for s in report.samples
+            ],
+        }
+
+    @app.get("/api/ghspeed")
+    def ghspeed_latest(st: Store = Depends(get_st)) -> dict[str, Any]:
+        """每节点最新一条 GitHub 测速结果（速度榜数据源，按速度降序）。"""
+        rows = [
+            {
+                "node_name": s.node_name,
+                "source_sub": s.source_sub,
+                "checked_at": s.checked_at,
+                "speed_mbps": s.speed_mbps,
+            }
+            for s in sorted(
+                st.latest_gh_speed_samples(),
+                key=lambda s: -(s.speed_mbps if s.speed_mbps is not None else -1.0),
+            )
+        ]
+        return {"results": rows}
 
     @app.get("/api/health/history")
     def health_history(
