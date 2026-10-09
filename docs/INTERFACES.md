@@ -355,20 +355,34 @@ class IpApiProvider:                    # 默认实现，http://ip-api.com/json/
         # 免费额度 45 req/min → 内置限速（min_interval 秒/次）；429 时退避重试一次
     def lookup(self, *, proxy_url: str | None = None) -> dict
 
+class PurityEnhancer(Protocol):        # 增强源：按已知出口 IP 补查第二数据源；只增强、不主判
+    def lookup(self, *, ip: str, proxy_url: str | None = None) -> dict: ...
+
+class IpInfoWidgetClient:              # 默认增强实现，https://ipinfo.io/widget/demo/{ip}（免 key）
+    def __init__(self, *, timeout: float = 10.0) -> None
+    def lookup(self, *, ip: str, proxy_url: str | None = None) -> dict
+        # 返回 data.asn.type（isp/hosting/…）+ 顶层 is_hosting/is_mobile + data.privacy.{vpn,proxy,tor,hosting}
+
 @dataclass
 class PurityReport:
     results: list[PurityResult]
     unavailable: bool                   # 探测实例启动失败/中途崩溃 → True，主链路无感
     checked: int
+    enhanced: int                       # 其中成功合入 ipinfo 增强数据的节点数
     skipped: int                        # full=False 时未测的已有结果节点数
 
 def claude_rank_result(result: PurityResult, node: Node | None) -> int
     # docs/03 §4：住宅 3 / 中小机房 2 / 大厂云 ASN 集合 1 / proxy=true 0
+    # ipinfo 增强：asn.type=isp 权威住宅；asn.type=hosting / is_hosting 权威机房；
+    # is_mobile 权威移动；privacy.vpn/proxy/tor 命中 → 封顶 2
 
 def scan(nodes: list[Node], *, config: AppConfig, store: Store,
-         provider: PurityProvider | None = None, full: bool = False) -> PurityReport
+         provider: PurityProvider | None = None,
+         enhancer: PurityEnhancer | None = None, full: bool = False) -> PurityReport
     # full=False 只测「无结果或已失效」节点（增量）；逐节点：probe.select → probe.local_proxy_url
-    # 经代理 lookup → 组装 PurityResult → store.save_purity_result；异常节点跳过计数
+    # 经代理 lookup → _enhance_raw 按出口 IP 补查增强源（best-effort，失败仅忽略）→
+    # 组装 PurityResult → store.save_purity_result；异常节点跳过计数；enhancer=None 默认启用
+    # IpInfoWidgetClient（测试传入显式实现替换）
 
 def claude_recommendations(latest: list[PurityResult], nodes: list[Node]) -> list[PurityResult]
     # Claude 专用组推荐 Top3（claude_rank 降序，住宅恒在机房前；无数据时按 docs/02 静态排序回退）
