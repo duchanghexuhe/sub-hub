@@ -1,6 +1,8 @@
 # sub-hub — 机场订阅转换与配置分发枢纽
 
-> 一句话：自研轻量容器部署在 NAS，输入多个机场订阅，输出带完整 AI 分流、Claude 纯净分组、快速故障切换的 mihomo（Clash Verge）与 Shadowrocket 双格式配置，并作为规则集的局域网分发源。
+> 一句话：自研轻量容器部署在 NAS，输入多个机场订阅，输出带完整 AI 分流、Claude 纯净分组、快速故障切换的 mihomo（Clash Verge）与 SR 双端配置，并作为规则集的局域网分发源。
+
+> **状态（2026-10-09）**：本文为立项设计定稿，项目已上线 NAS 运行。**当前功能与用法以根目录 [README](../README.md) 为准**；下文决定仍然有效的保留原文，已随迭代演进的随文标注。
 
 ## 目标
 
@@ -22,26 +24,26 @@
 | 4 | 节点命名规范良好：国旗 emoji + `专线`/`家庭`（家宽）后缀 + `x2/x3` 倍率 | **利好**：可用关键词做地区识别与住宅 IP 标记，无需逐节点人工标注 |
 | 5 | 订阅直接返回 Clash YAML（`text/yaml`），含 vless/anytls/ss 协议 | 转换负担轻，无需 subconverter 这类重型转换器 |
 
-环境事实：NAS（`ssh nas`，QNAP）为 7×24 常开设备，既有部署惯例 `/share/Container/<name>` + compose；本机 Windows 跑 Clash Verge（mihomo，混合端口 7897 / 控制 API 9097）；手机用 Shadowrocket。NAS 已占用端口：3000、6363、8096、8123、8124。
+环境事实：NAS（`ssh nas`，QNAP）为 7×24 常开设备，既有部署惯例 `/share/Container/<name>` + compose；本机 Windows 跑 Clash Verge（mihomo，混合端口 7897 / 控制 API 9097）；手机用 SR。NAS 已占用端口：3000、6363、8096、8123、8124。
 
 ## 方案结论
 
 **自研 Python FastAPI 轻量容器 `sub-hub`，部署于 NAS（端口 8399）**。内核链路：
 
 ```
-订阅抓取 → 节点解析/清洗/分类 → 模板渲染（mihomo YAML + Shadowrocket conf）→ 局域网分发
+订阅抓取 → 节点解析/清洗/分类 → 模板渲染（mihomo YAML + SR conf）→ 局域网分发
                 ↓
         纯净度检测引擎（内置 mihomo 探测实例 + ip-api）→ 检测报告 → Claude 组排序建议
 ```
 
-Clash Verge 与 Shadowrocket 把「订阅地址」指向本容器，机场更新后容器自动重建配置，两端规则行为一致。
+Clash Verge 与 SR 把「订阅地址」指向本容器，机场更新后容器自动重建配置，两端规则行为一致。
 
 ## ⚑ 已拍板决定
 
 | # | 决定 | 理由 |
 | --- | --- | --- |
 | 1 | 自研 Python/FastAPI 轻量容器，不用 subconverter / Sub-Store | 机场订阅已是 Clash YAML，转换负担轻；分组模板、纯净度检测、订阅管理需要全链路可控，套壳两套系统不如一套自研 |
-| 2 | 双格式输出：mihomo YAML（主）+ Shadowrocket 原生 conf（次），规则集由容器托管分发 | 端行为一致；anytls 协议需 Shadowrocket 6.3+，原生 conf 兜底；客户端从 NAS 拉规则不受上游墙影响 |
+| 2 | 双格式输出：mihomo YAML（主）+ SR conf（次），规则集由容器托管分发 | 端行为一致；anytls 协议需 SR 6.3+，原生 conf 兜底；客户端从 NAS 拉规则不受上游墙影响。（2026-09-29 演进：SR 主入口改为 Clash 兼容 yaml `shadowrocket.yaml`——原生 conf 无法表达 VLESS REALITY，见 04 文档） |
 | 3 | 部署 NAS `/share/Container/sub-hub`，端口 **8399** | 7×24 常开、全屋配置源；沿用既有 compose 惯例；3000/8096/8123/8124/6363 已占用 |
 | 4 | **Claude 专用组 = 手动锁定（select）为主 + fallback 备援组，绝不 url-test 轮换** | Claude 封号主因是 IP 频繁跳变；fallback 只在当前节点死亡时切换，平时 IP 稳定 |
 | 5 | 纯净度检测 = 容器内置 mihomo 探测实例 + ip-api 定期自动检测 | 用户选择；检测结果驱动 Claude 组默认排序与「家宽被换成机房」告警 |
@@ -49,7 +51,7 @@ Clash Verge 与 Shadowrocket 把「订阅地址」指向本容器，机场更新
 | 7 | 测速参数：interval 120s（关键组 60~90s）、tolerance 40ms、max-failed-times 3、探活 URL 用 cloudflare generate_204 | 机场默认 86400s 是滞后根源；cloudflare 204 对各类节点友好度好于 google 204 |
 | 8 | 订阅凭据 Fernet 加密落盘（密钥 `data/secret.key`，0600），分发链接带随机 token | 订阅 URL 即机场凭证；NAS 上多服务共享存储，防明文泄露 |
 | 9 | 外网接入：**离线自包含配置为保底 + 可选公网静态镜像推送（`mirror` 模块，默认关闭）**，不使用任何组网 VPN | 用户无公网 IP/域名/VPS 且拒绝 Tailscale；NAS「推」产物到免费托管（推荐 CF Workers+KV，带 token 鉴权）即可让外网订阅自动更新；推送含节点凭证属敏感动作，须用户显式开启；镜像不通时离线包永远可用 |
-| 10 | 规则上游：blackmatrix7/ios_rule_script 为主（Clash/Shadowrocket 双格式齐全）+ 自维护 `claude-extra` 补丁 + Loyalsoldier/clash-rules 兜底 | 单一上游有断更/漏域风险；Claude Code 端点需显式钉死（见 02 文档） |
+| 10 | 规则上游：blackmatrix7/ios_rule_script 为主（Clash/SR 双格式齐全）+ 自维护 `claude-extra` 补丁 + Loyalsoldier/clash-rules 兜底 | 单一上游有断更/漏域风险；Claude Code 端点需显式钉死（见 02 文档） |
 
 ## 文档导航
 
@@ -58,7 +60,7 @@ Clash Verge 与 Shadowrocket 把「订阅地址」指向本容器，机场更新
 | [01-架构与数据流](01-架构与数据流.md) | 容器内模块架构、端到端数据流、失败路径与安全网 |
 | [02-转换引擎与分组模板](02-转换引擎与分组模板.md) | 节点清洗分类、分组清单与语义（Claude/AI 核心）、规则集体系、双格式输出、测速参数 |
 | [03-订阅管理与纯净度检测](03-订阅管理与纯净度检测.md) | 存储/加密、API 契约、Web UI、纯净度检测引擎与评分 |
-| [04-客户端接入与验收](04-客户端接入与验收.md) | Clash Verge / Shadowrocket 接入步骤、端到端验收清单、故障场景预期 |
+| [04-客户端接入与验收](04-客户端接入与验收.md) | Clash Verge / SR 接入步骤、端到端验收清单、故障场景预期 |
 
 ## 范围外
 
