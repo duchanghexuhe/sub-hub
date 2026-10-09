@@ -3,7 +3,7 @@
 纪律：控制 API 与 ip-api 全部用假实现（本地线程 HTTP 假服务 / MockTransport / FakeProbe），
 绝不真跑 mihomo、绝不访问外网；数据目录走 conftest 的 tmp_path 隔离。
 覆盖：评分各分支、限速间隔、增量逻辑、unavailable 降级、属性变化告警、
-探测配置生成与控制 API 封装。
+探测配置生成与控制 API 封装、ipinfo widget 增强源（客户端解析 / 合流纪律 / 权威分类 / privacy 降档）。
 """
 from __future__ import annotations
 
@@ -26,7 +26,10 @@ from app.models import Node, PurityResult
 from app.probe import PROBE_GROUP, ProbeInstance
 from app.purity import (
     IpApiProvider,
+    IpInfoWidgetClient,
+    IpInfoWidgetError,
     PurityProviderError,
+    _enhance_raw,
     build_purity_result,
     claude_rank_result,
     classify_ip_type,
@@ -161,6 +164,41 @@ class FakeProvider:
                 raise item
             return item
         return dict(self.default)
+
+
+class NoopEnhancer:
+    """PurityEnhancer no-op 假实现：返回空 dict（不合并任何增强数据），仅记录调用。"""
+
+    def __init__(self, *args, **kwargs) -> None:
+        self.calls: list[dict] = []
+
+    def lookup(self, *, ip: str, proxy_url: str | None = None) -> dict:
+        self.calls.append({"ip": ip, "proxy_url": proxy_url})
+        return {}
+
+
+class RecordingEnhancer(NoopEnhancer):
+    """按构造参数返回固定 widget 数据 / 抛错的假增强源。"""
+
+    def __init__(self, result: dict | None = None, error: Exception | None = None) -> None:
+        super().__init__()
+        self.result = result if result is not None else {}
+        self.error = error
+
+    def lookup(self, *, ip: str, proxy_url: str | None = None) -> dict:
+        self.calls.append({"ip": ip, "proxy_url": proxy_url})
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+@pytest.fixture(autouse=True)
+def noop_default_enhancer(monkeypatch: pytest.MonkeyPatch):
+    """默认把增强源构造类换成 no-op：scan 全部用例不发起真实 ipinfo 查询。
+
+    增强行为用例显式传入 RecordingEnhancer 验证；默认构造行为另有打桩用例覆盖。
+    """
+    monkeypatch.setattr(purity_mod, "IpInfoWidgetClient", NoopEnhancer)
 
 
 # ---------------------------------------------------------------------- 假控制 API / 假代理服务器
@@ -438,6 +476,85 @@ class TestIpApiProvider:
         assert sent.startswith("http://ip-api.com/json/?fields=status,country,as,asname,org,isp,proxy,hosting,mobile")
 
 
+# ---------------------------------------------------------------------- IpInfoWidgetClient（增强源）
+
+_WIDGET_JSON = {
+    "ip": "203.0.113.1",
+    "country": "US",
+    "asn": {"asn": "AS7018", "name": "AT&T Services, Inc.", "domain": "att.com", "type": "isp"},
+    "company": {"name": "AT&T Services, Inc.", "domain": "att.com", "type": "isp"},
+    "privacy": {"vpn": False, "proxy": False, "tor": False, "relay": False, "hosting": False},
+    "is_hosting": False,
+    "is_mobile": False,
+}
+
+
+class TestIpInfoWidgetClient:
+    def test_parses_widget_response(self):
+        seen: dict = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["path"] = request.url.path
+            seen["ua"] = request.headers.get("user-agent", "")
+            return httpx.Response(200, json=_WIDGET_JSON)
+
+        client = IpInfoWidgetClient(transport=httpx.MockTransport(handler))
+        data = client.lookup(ip="203.0.113.1")
+        assert data == _WIDGET_JSON
+        assert seen["path"] == "/widget/demo/203.0.113.1"
+        assert "Mozilla/5.0" in seen["ua"]
+
+    @pytest.mark.parametrize(("status_code", "body"),
+                             [(503, b"service unavailable"), (200, b"<html>not json</html>")])
+    def test_bad_response_raises(self, status_code, body):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code, content=body)
+
+        client = IpInfoWidgetClient(transport=httpx.MockTransport(handler))
+        with pytest.raises(IpInfoWidgetError):
+            client.lookup(ip="203.0.113.1")
+
+    def test_transport_error_raises(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("boom")
+
+        client = IpInfoWidgetClient(transport=httpx.MockTransport(handler))
+        with pytest.raises(IpInfoWidgetError):
+            client.lookup(ip="203.0.113.1")
+
+
+class TestEnhanceRaw:
+    def test_merges_and_reports(self):
+        raw = _raw()
+        enhancer = RecordingEnhancer(result=_WIDGET_JSON)
+        merged, did = _enhance_raw(raw, enhancer, proxy_url="http://127.0.0.1:9", node_name="节点一")
+        assert did is True
+        assert merged["ipinfo"] == _WIDGET_JSON
+        assert "ipinfo" not in raw                       # 原 raw 不被就地修改
+        assert enhancer.calls == [{"ip": "203.0.113.1", "proxy_url": "http://127.0.0.1:9"}]
+
+    def test_failure_degrades_to_base_data(self):
+        raw = _raw()
+        merged, did = _enhance_raw(raw, RecordingEnhancer(error=IpInfoWidgetError("HTTP 503")),
+                                   proxy_url=None, node_name="节点一")
+        assert did is False
+        assert merged == raw
+
+    def test_no_exit_ip_skips_lookup(self):
+        enhancer = RecordingEnhancer(result=_WIDGET_JSON)
+        merged, did = _enhance_raw({"status": "success"}, enhancer,
+                                   proxy_url=None, node_name="节点一")
+        assert did is False
+        assert enhancer.calls == []
+        assert merged == {"status": "success"}
+
+    def test_empty_widget_not_merged(self):
+        merged, did = _enhance_raw(_raw(), RecordingEnhancer(result={}),
+                                   proxy_url=None, node_name="节点一")
+        assert did is False
+        assert "ipinfo" not in merged
+
+
 # ---------------------------------------------------------------------- 评分与分类
 
 class TestClassificationAndRank:
@@ -495,6 +612,85 @@ class TestClassificationAndRank:
         assert classify_ip_type(result, node) == "unknown"
         result.hosting = True
         assert classify_ip_type(result, node) == "datacenter"
+
+    # ---------------- ipinfo 增强：权威分类与 privacy 降档
+
+    def test_authoritative_isp_overrides_keyword_miss(self):
+        """org 无 ISP 关键词，ipinfo asn.type=isp 权威判住宅 3 分。"""
+        raw = _raw(org="North State Company", **{"as": "AS64512 Example Networks"},
+                   asname="Example Networks", isp="North State Company",
+                   ipinfo={"asn": {"type": "isp", "name": "AT&T Services"}})
+        result = build_purity_result(_node("普通节点"), raw)
+        assert result.ip_type == "residential"
+        assert result.claude_rank == 3
+
+    def test_authoritative_hosting_fixes_ipapi_miss(self):
+        """ip-api 漏标 hosting，ipinfo asn.type=hosting 权威判机房。"""
+        raw = _raw(ipinfo={"asn": {"type": "hosting", "name": "Some IDC"}})
+        result = build_purity_result(_node("普通节点"), raw)
+        assert result.ip_type == "datacenter"
+        assert result.claude_rank == 2
+
+    def test_top_level_is_hosting_authoritative(self):
+        """顶层 is_hosting=true（2026-10-09 实测 schema）同样权威判机房。"""
+        raw = _raw(ipinfo={"is_hosting": True})
+        result = build_purity_result(_node("普通节点"), raw)
+        assert result.ip_type == "datacenter"
+        assert result.claude_rank == 2
+
+    def test_top_level_is_mobile_authoritative(self):
+        """顶层 is_mobile=true 权威判移动，与住宅同档 3 分。"""
+        raw = _raw(ipinfo={"is_mobile": True})
+        result = build_purity_result(_node("普通节点"), raw)
+        assert result.ip_type == "mobile"
+        assert result.claude_rank == 3
+
+    def test_privacy_flag_caps_residential_rank(self):
+        """关键词住宅 + privacy.vpn=true → 封顶 2 分；无标记则 3 分。"""
+        base = {"org": "Comcast Cable", "isp": "Comcast Cable"}
+        flagged = build_purity_result(_node("节点一"), _raw(
+            **base, ipinfo={"privacy": {"vpn": True, "proxy": False, "tor": False}}))
+        assert flagged.ip_type == "residential"
+        assert flagged.claude_rank == 2
+        clean = build_purity_result(_node("节点一"), _raw(
+            **base, ipinfo={"privacy": {"vpn": False, "proxy": False, "tor": False}}))
+        assert clean.claude_rank == 3
+
+    def test_privacy_cap_tor_counts_and_small_idc_unchanged(self):
+        """privacy.tor 同样触发封顶；中小机房 2 分封顶后不变。"""
+        tor = build_purity_result(_node("节点一"), _raw(
+            org="North State Company", isp="North State Company",
+            **{"as": "AS64512 Example Networks"}, asname="Example Networks",
+            ipinfo={"privacy": {"vpn": False, "proxy": False, "tor": True}}))
+        assert claude_rank_result(tor, None) == 2
+
+        idc = build_purity_result(_node("节点二"), _raw(
+            hosting=True, ipinfo={"privacy": {"vpn": True, "proxy": False, "tor": False}}))
+        assert claude_rank_result(idc, None) == 2
+
+    def test_big_cloud_matched_via_ipinfo_name(self):
+        """ip-api org/isp 缺失时，ipinfo company.name 命中大厂云关键词 → 机房 1 分。"""
+        raw = _raw(org=None, isp=None, **{"as": None}, asname=None, hosting=True,
+                   ipinfo={"asn": {"type": "hosting"},
+                           "company": {"name": "Amazon.com, Inc."}})
+        result = build_purity_result(_node("节点一"), raw)
+        assert result.ip_type == "datacenter"
+        assert result.claude_rank == 1
+
+    def test_proxy_one_vote_unaffected_by_enhancement(self):
+        """ip-api proxy=true 仍一票 0 分，ipinfo isp 信号不能救回。"""
+        result = build_purity_result(_node("节点一"), _raw(proxy=True,
+                                                           ipinfo={"asn": {"type": "isp"}}))
+        assert result.claude_rank == 0
+
+    def test_no_enhancement_keeps_legacy_behavior(self):
+        """无 ipinfo 增强时分类/评分与既有逻辑完全一致（unknown 2 分兜底）。"""
+        result = build_purity_result(_node("普通节点"), _raw(org="North State Company",
+                                                             **{"as": "AS64512 Example Networks"},
+                                                             asname="Example Networks",
+                                                             isp="North State Company"))
+        assert result.ip_type == "unknown"
+        assert result.claude_rank == 2
 
 
 # ---------------------------------------------------------------------- scan 主流程
@@ -662,6 +858,44 @@ class TestScan:
         report = purity_mod.scan([_node("节点一")], config=config, store=store, full=True)
         assert report.checked == 1
         assert len(created) == 1
+
+    def test_enhancer_merges_ipinfo_and_counts(self, config, store, fake_probe_cls):
+        """增强成功：widget 数据合入 raw 落库，report.enhanced 计数，查询经混合端口发往出口 IP。"""
+        enhancer = RecordingEnhancer(result={"asn": {"type": "isp"}, "privacy": {"vpn": True}})
+        report = purity_mod.scan([_node("节点一")], config=config, store=store,
+                                 provider=FakeProvider(), enhancer=enhancer, full=True)
+        assert (report.checked, report.enhanced) == (1, 1)
+        result = store.latest_purity_results()[0]
+        assert result.raw["ipinfo"]["asn"]["type"] == "isp"
+        assert result.claude_rank == 2                   # isp 权威住宅被 privacy.vpn 封顶
+        assert enhancer.calls[0]["ip"] == "203.0.113.1"
+        assert enhancer.calls[0]["proxy_url"] == "http://127.0.0.1:9096"
+
+    def test_enhancer_failure_keeps_base_data(self, config, store, fake_probe_cls):
+        """增强失败：只忽略该次增强，不影响该节点主数据落库。"""
+        enhancer = RecordingEnhancer(error=IpInfoWidgetError("HTTP 503"))
+        report = purity_mod.scan([_node("节点一")], config=config, store=store,
+                                 provider=FakeProvider(), enhancer=enhancer, full=True)
+        assert (report.checked, report.enhanced) == (1, 0)
+        result = store.latest_purity_results()[0]
+        assert result.ip_type == "residential"
+        assert result.claude_rank == 3
+        assert "ipinfo" not in result.raw
+
+    def test_default_enhancer_created_when_none_given(self, config, store, fake_probe_cls,
+                                                      monkeypatch):
+        """enhancer 缺省时构造 IpInfoWidgetClient（打桩确认，不发真实网络请求）。"""
+        created: list[int] = []
+
+        def spy_enhancer():
+            created.append(1)
+            return NoopEnhancer()
+
+        monkeypatch.setattr(purity_mod, "IpInfoWidgetClient", spy_enhancer)
+        report = purity_mod.scan([_node("节点一")], config=config, store=store,
+                                 provider=FakeProvider(), full=True)
+        assert report.checked == 1
+        assert created == [1]
 
 
 # ---------------------------------------------------------------------- Claude 推荐
