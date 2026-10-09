@@ -1,4 +1,4 @@
-# claude-extra — sub-hub 自维护 Claude 域名钉死规则集（Shadowrocket .list 格式）
+# claude-extra — sub-hub 自维护 Claude 域名钉死规则集（SR .list 格式）
 # 与 claude-extra.yaml 内容一致；由 sub-hub 以 RULE-SET 方式托管分发
 # 维护：域名增删改 rules_manifest.yaml 的 claude-extra.domains，并同步本文件与 claude-extra.yaml
 DOMAIN,api.anthropic.com
